@@ -106,28 +106,24 @@ def fetch_github_comments(repo: str, pr_number: int, github_token: str | None) -
             fail(f"Failed to query GitHub API for PR #{pr_number} comments: {e}")
         pages_fetched += 1
 
+    if next_url and pages_fetched >= max_pages:
+        fail(f"GitHub comments pagination exceeded limit of {max_pages} pages; partial comment history cannot be trusted")
+
     return comments
 
 def validate_governance_block_schema(auth_data: dict, repo_root: Path):
     schema_path = repo_root / "manifests" / "governance_request_schema.json"
-    if schema_path.exists():
-        try:
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema = json.load(f)
-            import jsonschema
-            jsonschema.Draft202012Validator.check_schema(schema)
-            validator = jsonschema.Draft202012Validator(schema)
-            validator.validate(auth_data)
-        except Exception as e:
-            fail(f"Governance authorization block fails schema validation: {e}")
-    else:
-        # Fallback inline schema validation if executed in minimal environment
-        required_fields = ["version", "decision", "repository", "pr_number", "base_sha", "head_sha", "authorized_paths"]
-        for field in required_fields:
-            if field not in auth_data:
-                fail(f"Governance authorization block missing required field '{field}'")
-        if not isinstance(auth_data["authorized_paths"], list) or len(auth_data["authorized_paths"]) == 0:
-            fail(f"Governance authorization block 'authorized_paths' must be a non-empty list")
+    if not schema_path.exists():
+        fail(f"Authoritative governance schema missing: {schema_path}")
+    try:
+        with open(schema_path, "r", encoding="utf-8") as f:
+            schema = json.load(f)
+        import jsonschema
+        jsonschema.Draft202012Validator.check_schema(schema)
+        validator = jsonschema.Draft202012Validator(schema)
+        validator.validate(auth_data)
+    except Exception as e:
+        fail(f"Governance authorization block fails schema validation: {e}")
 
 def parse_and_verify_governance_authorization(
     comments: list[dict],
@@ -135,7 +131,7 @@ def parse_and_verify_governance_authorization(
     expected_pr: int,
     expected_base: str,
     expected_head: str,
-    changed_control_plane: list[str],
+    all_changed_paths: list[str],
     repo_root: Path = Path("."),
 ) -> dict:
     """
@@ -203,8 +199,9 @@ def parse_and_verify_governance_authorization(
 
     authorized_paths_set = set(p.replace("\\", "/").lstrip("/") for p in latest_auth.get("authorized_paths", []))
 
-    # Verify every touched control plane path is explicitly authorized
-    for p in changed_control_plane:
+    # Mixed-scope enforcement: every file touched in the PR (both control plane and ordinary paths)
+    # must be explicitly declared in authorized_paths when governance transition is claimed.
+    for p in all_changed_paths:
         normalized_p = p.replace("\\", "/").lstrip("/")
         if normalized_p not in authorized_paths_set:
             fail(f"unauthorized-governance-path-scope path={normalized_p} not in authorized_paths")
@@ -227,10 +224,16 @@ def check_admission(base_sha: str, head_sha: str, repo_root: Path, pr_number: in
     if ret != 0 or out.strip() != b"commit":
         fail(f"Head ref {head_sha} is not a valid commit object")
 
-    # 2. Extract paths touched between base and head
-    ret, out, err = run_git(["diff", "--name-only", "-z", "--no-renames", base_sha, head_sha, "--"], repo_root)
+    # 2. Determine merge base to properly isolate candidate changes from base branch changes
+    ret, out, err = run_git(["merge-base", base_sha, head_sha], repo_root)
+    if ret != 0 or not out.strip():
+        fail(f"Failed to find common ancestor between base {base_sha} and head {head_sha}: {err.decode(errors='replace')}")
+    merge_base = out.strip().decode()
+
+    # 3. Extract paths touched by the PR candidate (merge_base...head_sha)
+    ret, out, err = run_git(["diff", "--name-only", "-z", "--no-renames", merge_base, head_sha, "--"], repo_root)
     if ret != 0:
-        fail(f"Failed to inspect git diff between {base_sha} and {head_sha}: {err.decode(errors='replace')}")
+        fail(f"Failed to inspect git diff between {merge_base} and {head_sha}: {err.decode(errors='replace')}")
 
     raw_paths = out.split(b"\0")
     changed_paths = [p.decode(errors="replace") for p in raw_paths if p]
@@ -239,10 +242,10 @@ def check_admission(base_sha: str, head_sha: str, repo_root: Path, pr_number: in
     for p in changed_paths:
         print(f"[trusted-checker:path] {p}")
 
-    # 3. Classify control-plane paths
+    # 4. Classify control-plane paths
     control_plane_changed = [p for p in changed_paths if is_protected_control_plane(p)]
 
-    # 4. If control-plane paths are touched, require verified OWNER GOVERNANCE GO
+    # 5. If control-plane paths are touched, require verified OWNER GOVERNANCE GO
     if control_plane_changed:
         print(f"[trusted-checker:mode] governance-transition control_plane_paths={len(control_plane_changed)}")
         if pr_number is None or pr_number <= 0:
@@ -264,11 +267,11 @@ def check_admission(base_sha: str, head_sha: str, repo_root: Path, pr_number: in
             pr_number,
             base_sha,
             head_sha,
-            control_plane_changed,
+            changed_paths,
             repo_root=repo_root
         )
 
-    # 5. If upstream_anchor.json is touched, validate candidate content as pure data
+    # 6. If upstream_anchor.json is touched, validate candidate content as pure data
     if "upstream_anchor.json" in changed_paths:
         ret, candidate_anchor_bytes, err = run_git(["cat-file", "-p", f"{head_sha}:upstream_anchor.json"], repo_root)
         if ret != 0:

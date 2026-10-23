@@ -59,6 +59,9 @@ class TestAdversarialAdmissionAndProvenance(unittest.TestCase):
         # Set author identity locally within the temporary test fixture repository
         self.run_cmd(["git", "config", "user.name", "Test Harness Runner"], cwd=tmp_repo)
         self.run_cmd(["git", "config", "user.email", "test-runner@semantic-dist.local"], cwd=tmp_repo)
+        # Copy existing upstream cache if present to avoid repeated external network fetches
+        if (REPO_ROOT / ".upstream_cache").exists():
+            shutil.copytree(REPO_ROOT / ".upstream_cache", tmp_repo / ".upstream_cache", dirs_exist_ok=True)
         # In the clone, make a commit that represents the established base
         shutil.copytree(CI_DIR, tmp_repo / "ci", dirs_exist_ok=True)
         shutil.copytree(REPO_ROOT / ".github", tmp_repo / ".github", dirs_exist_ok=True)
@@ -477,6 +480,102 @@ class TestAdversarialAdmissionAndProvenance(unittest.TestCase):
 
             with self.assertRaises(SystemExit) as cm:
                 trusted_pr_checker.check_admission(base_sha, head_sha, tmp_repo, pr_number=1, mock_comments=malformed_comments)
+            self.assertEqual(cm.exception.code, 1)
+
+    def test_15_pagination_limit_exceeded_fails_closed(self):
+        """Test 15: If comment pagination hits max_pages while Link rel="next" still exists, it must fail closed."""
+        from unittest.mock import patch, MagicMock
+
+        page_data = json.dumps([{"id": 1, "body": "comment"}]).encode("utf-8")
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = page_data
+        resp.headers.get.return_value = '<https://api.github.com/repos/test/repo/issues/1/comments?page=next>; rel="next"'
+        resp.__enter__.return_value = resp
+
+        # Patch max_pages down to 2 for this test
+        with patch.object(trusted_pr_checker, "urllib") as mock_urllib:
+            mock_urllib.request.urlopen.return_value = resp
+            mock_urllib.request.Request = MagicMock()
+            # Run fetch_github_comments and expect SystemExit due to fail()
+            with self.assertRaises(SystemExit) as cm:
+                # temporarily test with while loop exceeding limit
+                trusted_pr_checker.fetch_github_comments("test/repo", 1, "token")
+            self.assertEqual(cm.exception.code, 1)
+
+    def test_16_missing_authoritative_governance_schema_fails_closed(self):
+        """Test 16: If governance schema is missing on base, validation fails closed (no fallback)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo, base_sha = self.create_fixture_base_and_candidate(tmp_dir)
+            (tmp_repo / ".github" / "workflows" / "package-windows.yml").write_text("name: Windows Package\n", encoding="utf-8")
+            self.run_cmd(["git", "add", ".github/workflows/package-windows.yml"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "add windows package workflow"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            head_sha = out.strip()
+
+            # Remove schema file
+            schema_file = tmp_repo / "manifests" / "governance_request_schema.json"
+            if schema_file.exists():
+                schema_file.unlink()
+
+            owner_comments = [{
+                "user": {"login": "skulmakov-oss"},
+                "author_association": "OWNER",
+                "body": f"```governance-authorization\n{{\"version\": \"1.0.0\", \"decision\": \"OWNER GOVERNANCE GO\", \"repository\": \"skulmakov-oss/Semantic-Dist\", \"pr_number\": 1, \"base_sha\": \"{base_sha}\", \"head_sha\": \"{head_sha}\", \"authorized_paths\": [\".github/workflows/package-windows.yml\"]}}\n```"
+            }]
+
+            with self.assertRaises(SystemExit) as cm:
+                trusted_pr_checker.check_admission(base_sha, head_sha, tmp_repo, pr_number=1, mock_comments=owner_comments)
+            self.assertEqual(cm.exception.code, 1)
+
+    def test_17_merge_base_drift_with_base_protected_changes(self):
+        """Test 17: Ordinary docs PR diverged from base when base later introduced protected files.
+        Candidate only modifies docs -> merge-base diff contains only docs -> passes!"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo, initial_base_sha = self.create_fixture_base_and_candidate(tmp_dir)
+
+            # Create feature branch from initial base
+            self.run_cmd(["git", "checkout", "-b", "feature-docs"], cwd=tmp_repo)
+            (tmp_repo / "docs" / "user_guide.md").write_text("# Guide\n", encoding="utf-8")
+            self.run_cmd(["git", "add", "docs/user_guide.md"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "add guide"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            feature_head_sha = out.strip()
+
+            # Now update master/base to simulate intervening commit with a protected file
+            self.run_cmd(["git", "checkout", "-q", initial_base_sha], cwd=tmp_repo)
+            self.run_cmd(["git", "checkout", "-b", "advanced-base"], cwd=tmp_repo)
+            (tmp_repo / ".github" / "workflows" / "new-ci.yml").write_text("# new base workflow\n", encoding="utf-8")
+            self.run_cmd(["git", "add", ".github/workflows/new-ci.yml"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "new ci in base"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            advanced_base_sha = out.strip()
+
+            # Check admission of feature_head_sha against advanced_base_sha.
+            # Using merge-base, diff is feature_head_sha vs initial_base_sha -> only docs/user_guide.md changed.
+            # It should PASS ordinary admission without misclassifying .github/workflows/new-ci.yml as PR changes.
+            trusted_pr_checker.check_admission(advanced_base_sha, feature_head_sha, tmp_repo)
+
+    def test_18_mixed_scope_governance_pr_rejects_undeclared_paths(self):
+        """Test 18: Governance authorization covering .github/workflow cannot smuggle undeclared launcher source or script."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo, base_sha = self.create_fixture_base_and_candidate(tmp_dir)
+            (tmp_repo / ".github" / "workflows" / "package-windows.yml").write_text("name: Windows Package\n", encoding="utf-8")
+            (tmp_repo / "launcher" / "backdoor.rs").write_text("fn backdoor() {}\n", encoding="utf-8")
+            self.run_cmd(["git", "add", ".github/workflows/package-windows.yml", "launcher/backdoor.rs"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "mixed scope change"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            head_sha = out.strip()
+
+            # Owner authorization only explicitly authorized the workflow, NOT launcher/backdoor.rs
+            owner_comments = [{
+                "user": {"login": "skulmakov-oss"},
+                "author_association": "OWNER",
+                "body": f"```governance-authorization\n{{\"version\": \"1.0.0\", \"decision\": \"OWNER GOVERNANCE GO\", \"repository\": \"skulmakov-oss/Semantic-Dist\", \"pr_number\": 1, \"base_sha\": \"{base_sha}\", \"head_sha\": \"{head_sha}\", \"authorized_paths\": [\".github/workflows/package-windows.yml\"]}}\n```"
+            }]
+
+            with self.assertRaises(SystemExit) as cm:
+                trusted_pr_checker.check_admission(base_sha, head_sha, tmp_repo, pr_number=1, mock_comments=owner_comments)
             self.assertEqual(cm.exception.code, 1)
 
 if __name__ == "__main__":
