@@ -27,11 +27,10 @@ jobs:
 
       - name: Validate Python 3.11 Syntax Compatibility
         run: |
-          python -m py_compile ci/trusted_pr_checker.py
           python -m py_compile ci/verify_provenance.py
+
+      - name: Run Provenance Regression Tests
+        run: python tests/test_adversarial_admission.py
 
       - name: Verify Upstream Provenance and Identity
         run: python ci/verify_provenance.py
-
-      - name: Run Adversarial Admission and Regression Tests
-        run: python tests/test_adversarial_admission.py
