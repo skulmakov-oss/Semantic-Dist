@@ -431,5 +431,31 @@ class TestAdversarialAdmissionAndProvenance(unittest.TestCase):
             # Should succeed without exception
             trusted_pr_checker.check_admission(base_sha, head_sha, tmp_repo, pr_number=1, mock_comments=owner_comments)
 
+    def test_13_pagination_in_fetch_github_comments(self):
+        """Test 13: fetch_github_comments traverses Link rel="next" headers until exhausted."""
+        from unittest.mock import patch, MagicMock
+
+        page1_data = json.dumps([{"id": 1, "body": "comment 1"}]).encode("utf-8")
+        page2_data = json.dumps([{"id": 2, "body": "comment 2"}]).encode("utf-8")
+
+        resp1 = MagicMock()
+        resp1.status = 200
+        resp1.read.return_value = page1_data
+        resp1.headers.get.return_value = '<https://api.github.com/repos/test/repo/issues/1/comments?page=2>; rel="next"'
+        resp1.__enter__.return_value = resp1
+
+        resp2 = MagicMock()
+        resp2.status = 200
+        resp2.read.return_value = page2_data
+        resp2.headers.get.return_value = ""
+        resp2.__enter__.return_value = resp2
+
+        with patch("urllib.request.urlopen", side_effect=[resp1, resp2]) as mock_urlopen:
+            comments = trusted_pr_checker.fetch_github_comments("test/repo", 1, "token")
+            self.assertEqual(len(comments), 2)
+            self.assertEqual(comments[0]["id"], 1)
+            self.assertEqual(comments[1]["id"], 2)
+            self.assertEqual(mock_urlopen.call_count, 2)
+
 if __name__ == "__main__":
     unittest.main()

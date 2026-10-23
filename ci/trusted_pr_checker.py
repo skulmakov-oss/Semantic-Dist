@@ -68,20 +68,45 @@ def is_protected_control_plane(path_str: str) -> bool:
     return False
 
 def fetch_github_comments(repo: str, pr_number: int, github_token: str | None) -> list[dict]:
-    api_url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
-    req = urllib.request.Request(api_url)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("User-Agent", "Semantic-Dist-Trusted-Checker")
-    if github_token:
-        req.add_header("Authorization", f"Bearer {github_token}")
+    comments: list[dict] = []
+    next_url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments?per_page=100"
+    pages_fetched = 0
+    max_pages = 50  # fail-safe upper bound against runaway pagination
 
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            if resp.status != 200:
-                fail(f"GitHub API returned HTTP {resp.status} fetching comments for PR #{pr_number}")
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        fail(f"Failed to query GitHub API for PR #{pr_number} comments: {e}")
+    while next_url and pages_fetched < max_pages:
+        req = urllib.request.Request(next_url)
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("User-Agent", "Semantic-Dist-Trusted-Checker")
+        if github_token:
+            req.add_header("Authorization", f"Bearer {github_token}")
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                if resp.status != 200:
+                    fail(f"GitHub API returned HTTP {resp.status} fetching comments for PR #{pr_number}")
+                data = json.loads(resp.read().decode("utf-8"))
+                if not isinstance(data, list):
+                    fail(f"Malformed comments payload received from GitHub API for PR #{pr_number}")
+                comments.extend(data)
+
+                # Parse pagination from Link header
+                link_header = resp.headers.get("Link", "")
+                next_url = None
+                if link_header:
+                    links = link_header.split(",")
+                    for link in links:
+                        parts = link.split(";")
+                        if len(parts) >= 2:
+                            url_part = parts[0].strip()
+                            rel_part = parts[1].strip()
+                            if rel_part == 'rel="next"' and url_part.startswith("<") and url_part.endswith(">"):
+                                next_url = url_part[1:-1]
+                                break
+        except Exception as e:
+            fail(f"Failed to query GitHub API for PR #{pr_number} comments: {e}")
+        pages_fetched += 1
+
+    return comments
 
 def parse_and_verify_governance_authorization(
     comments: list[dict],
