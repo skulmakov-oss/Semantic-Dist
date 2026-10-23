@@ -38,6 +38,9 @@ class TestAdversarialAdmissionAndProvenance(unittest.TestCase):
         """Create a fixture repo where 'base' is an initial commit and candidate branches off it."""
         tmp_repo = Path(tmp_dir) / "repo"
         self.run_cmd(["git", "clone", str(REPO_ROOT), str(tmp_repo)])
+        # Set author identity locally within the temporary test fixture repository
+        self.run_cmd(["git", "config", "user.name", "Test Harness Runner"], cwd=tmp_repo)
+        self.run_cmd(["git", "config", "user.email", "test-runner@semantic-dist.local"], cwd=tmp_repo)
         # In the clone, make a commit that represents the established base
         shutil.copytree(CI_DIR, tmp_repo / "ci", dirs_exist_ok=True)
         shutil.copytree(REPO_ROOT / ".github", tmp_repo / ".github", dirs_exist_ok=True)

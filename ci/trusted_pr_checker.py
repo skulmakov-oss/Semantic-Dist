@@ -94,8 +94,9 @@ def check_admission(base_sha: str, head_sha: str, repo_root: Path):
 
     # 3. Guard against tampering with the trusted control plane
     for p in changed_paths:
-        if is_protected_control_plane(p):
-            fail(f"unauthorized-control-plane-modification path={p.replace('\\', '/')}")
+        normalized_p = p.replace("\\", "/")
+        if is_protected_control_plane(normalized_p):
+            fail(f"unauthorized-control-plane-modification path={normalized_p}")
 
     # 4. If upstream_anchor.json is touched, validate candidate content as pure data
     if "upstream_anchor.json" in changed_paths:
