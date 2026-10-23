@@ -62,6 +62,7 @@ class TestAdversarialAdmissionAndProvenance(unittest.TestCase):
         # In the clone, make a commit that represents the established base
         shutil.copytree(CI_DIR, tmp_repo / "ci", dirs_exist_ok=True)
         shutil.copytree(REPO_ROOT / ".github", tmp_repo / ".github", dirs_exist_ok=True)
+        shutil.copytree(REPO_ROOT / "manifests", tmp_repo / "manifests", dirs_exist_ok=True)
         self.run_cmd(["git", "add", "."], cwd=tmp_repo)
         self.run_cmd(["git", "commit", "-qm", "established base with checker"], cwd=tmp_repo)
         ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
@@ -456,6 +457,27 @@ class TestAdversarialAdmissionAndProvenance(unittest.TestCase):
             self.assertEqual(comments[0]["id"], 1)
             self.assertEqual(comments[1]["id"], 2)
             self.assertEqual(mock_urlopen.call_count, 2)
+
+    def test_14_governance_authorization_schema_validation_rejects_malformed(self):
+        """Test 14: Governance block violating schema (missing required field or bad type) fails admission."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo, base_sha = self.create_fixture_base_and_candidate(tmp_dir)
+            (tmp_repo / ".github" / "workflows" / "package-windows.yml").write_text("name: Windows Package\n", encoding="utf-8")
+            self.run_cmd(["git", "add", ".github/workflows/package-windows.yml"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "add windows package workflow"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            head_sha = out.strip()
+
+            # Malformed governance block: missing 'version' and authorized_paths is a mapping instead of array
+            malformed_comments = [{
+                "user": {"login": "skulmakov-oss"},
+                "author_association": "OWNER",
+                "body": f"```governance-authorization\n{{\"decision\": \"OWNER GOVERNANCE GO\", \"repository\": \"skulmakov-oss/Semantic-Dist\", \"pr_number\": 1, \"base_sha\": \"{base_sha}\", \"head_sha\": \"{head_sha}\", \"authorized_paths\": {{\"path\": \".github/workflows/package-windows.yml\"}}}}\n```"
+            }]
+
+            with self.assertRaises(SystemExit) as cm:
+                trusted_pr_checker.check_admission(base_sha, head_sha, tmp_repo, pr_number=1, mock_comments=malformed_comments)
+            self.assertEqual(cm.exception.code, 1)
 
 if __name__ == "__main__":
     unittest.main()

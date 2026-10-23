@@ -108,6 +108,27 @@ def fetch_github_comments(repo: str, pr_number: int, github_token: str | None) -
 
     return comments
 
+def validate_governance_block_schema(auth_data: dict, repo_root: Path):
+    schema_path = repo_root / "manifests" / "governance_request_schema.json"
+    if schema_path.exists():
+        try:
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema = json.load(f)
+            import jsonschema
+            jsonschema.Draft202012Validator.check_schema(schema)
+            validator = jsonschema.Draft202012Validator(schema)
+            validator.validate(auth_data)
+        except Exception as e:
+            fail(f"Governance authorization block fails schema validation: {e}")
+    else:
+        # Fallback inline schema validation if executed in minimal environment
+        required_fields = ["version", "decision", "repository", "pr_number", "base_sha", "head_sha", "authorized_paths"]
+        for field in required_fields:
+            if field not in auth_data:
+                fail(f"Governance authorization block missing required field '{field}'")
+        if not isinstance(auth_data["authorized_paths"], list) or len(auth_data["authorized_paths"]) == 0:
+            fail(f"Governance authorization block 'authorized_paths' must be a non-empty list")
+
 def parse_and_verify_governance_authorization(
     comments: list[dict],
     expected_repo: str,
@@ -115,6 +136,7 @@ def parse_and_verify_governance_authorization(
     expected_base: str,
     expected_head: str,
     changed_control_plane: list[str],
+    repo_root: Path = Path("."),
 ) -> dict:
     """
     Search comments for authenticated owner authorization matching exact PR, BASE, HEAD, and path scope.
@@ -175,6 +197,10 @@ def parse_and_verify_governance_authorization(
 
     # Use the latest valid authorization
     latest_auth = valid_authorizations[-1]
+
+    # Validate against authoritative governance request schema
+    validate_governance_block_schema(latest_auth, repo_root)
+
     authorized_paths_set = set(p.replace("\\", "/").lstrip("/") for p in latest_auth.get("authorized_paths", []))
 
     # Verify every touched control plane path is explicitly authorized
@@ -238,7 +264,8 @@ def check_admission(base_sha: str, head_sha: str, repo_root: Path, pr_number: in
             pr_number,
             base_sha,
             head_sha,
-            control_plane_changed
+            control_plane_changed,
+            repo_root=repo_root
         )
 
     # 5. If upstream_anchor.json is touched, validate candidate content as pure data
