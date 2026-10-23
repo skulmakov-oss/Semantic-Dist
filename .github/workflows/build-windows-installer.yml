@@ -1,0 +1,231 @@
+name: Build Windows x64 Installer (Developer Preview)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-installer:
+    name: Build Windows x64 Installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout distribution repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install Pinned Validation Dependencies
+        run: pip install --require-hashes -r ci/requirements.txt
+
+      - name: Verify Upstream Provenance Before Build
+        run: python ci/verify_provenance.py
+
+      - name: Install Rust Toolchain 1.97.1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: "1.97.1"
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Native Launcher
+        run: |
+          cd launcher/sm-launch
+          cargo test --locked
+          cargo build --locked --release
+
+      - name: Clone and Verify Pinned Upstream Semantic
+        run: |
+          git clone --no-checkout https://github.com/skulmakov-oss/Semantic.git upstream
+          cd upstream
+          git checkout 1d1e76c7509a03baa0133abaaa5819f5d32582b2
+          cargo build --locked --release --bin smc --bin svm
+
+      - name: Stage Artifacts
+        run: |
+          mkdir -p dist-staging/bin
+          cp upstream/target/release/smc.exe dist-staging/bin/
+          cp upstream/target/release/svm.exe dist-staging/bin/
+          cp launcher/sm-launch/target/release/sm-launch.exe dist-staging/bin/
+        shell: bash
+
+      - name: Verify or Install Inno Setup
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Compile Inno Setup Installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/windows/setup.iss
+
+      - name: Generate Build Provenance Metadata
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: python ci/generate_build_provenance.py
+
+      - name: Run Noninteractive Smoke Check (Strict Exit Code Validation)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tempDir = Join-Path $env:TEMP "semantic-ci-test"
+          if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
+
+          Write-Host "1. Running silent installer (Fresh PATH installation)..."
+          $binDir = Join-Path $tempDir "bin"
+          $initialUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($null -eq $initialUserPath) { $initialUserPath = "" }
+          if ($initialUserPath.Contains($binDir)) {
+            throw "Initial user PATH already contains test bin directory: $binDir"
+          }
+
+          $installProc = Start-Process -FilePath "packaging/windows/dist/Semantic-Setup-x64.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$tempDir`"", "/TASKS=`"envPath,assocSm`"" -Wait -PassThru -NoNewWindow
+          if ($installProc.ExitCode -ne 0) {
+            throw "Installer exited with failure code: $($installProc.ExitCode)"
+          }
+
+          Write-Host "2. Verifying installed files exist..."
+          $smcExe = Join-Path $tempDir "bin\smc.exe"
+          $svmExe = Join-Path $tempDir "bin\svm.exe"
+          $launcherExe = Join-Path $tempDir "bin\sm-launch.exe"
+          foreach ($f in @($smcExe, $svmExe, $launcherExe)) {
+            if (-not (Test-Path $f)) { throw "Expected installed binary missing: $f" }
+          }
+
+          Write-Host "3. Verifying PATH was added and registry flag recorded..."
+          $postInstallPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if (-not $postInstallPath.Contains($binDir)) {
+            throw "User PATH does not contain $binDir after fresh install with envPath task!"
+          }
+          $addedUserPathVal = (Get-ItemProperty -Path "HKCU:\Software\Semantic" -ErrorAction SilentlyContinue).AddedUserPath
+          if ($addedUserPathVal -ne 1) {
+            throw "Expected AddedUserPath=1 in registry, got: $addedUserPathVal"
+          }
+
+          Write-Host "4. Testing smc version..."
+          $smcVerProc = Start-Process -FilePath $smcExe -ArgumentList "version" -Wait -PassThru -NoNewWindow
+          if ($smcVerProc.ExitCode -ne 0) {
+            throw "smc version exited with failure code: $($smcVerProc.ExitCode)"
+          }
+
+          Write-Host "5. Testing svm with compiled bytecode..."
+          $testSmComp = Join-Path $env:TEMP "ci_compile_test.sm"
+          $testSmc = Join-Path $env:TEMP "ci_compile_test.smc"
+          [System.IO.File]::WriteAllText($testSmComp, "fn main() { return; }")
+          $smcCompProc = Start-Process -FilePath $smcExe -ArgumentList "compile `"$testSmComp`" -o `"$testSmc`"" -Wait -PassThru -NoNewWindow
+          Remove-Item $testSmComp
+          if ($smcCompProc.ExitCode -ne 0) {
+            throw "smc compile exited with failure code: $($smcCompProc.ExitCode)"
+          }
+          $svmRunProc = Start-Process -FilePath $svmExe -ArgumentList "run `"$testSmc`"" -Wait -PassThru -NoNewWindow
+          Remove-Item $testSmc
+          if ($svmRunProc.ExitCode -ne 0) {
+            throw "svm run exited with failure code: $($svmRunProc.ExitCode)"
+          }
+
+          Write-Host "6. Testing sm-launch with valid program (running in existing console)..."
+          $testSm = Join-Path $env:TEMP "ci_valid.sm"
+          [System.IO.File]::WriteAllText($testSm, "fn main() { assert(1 + 1 == 2); return; }")
+          $launchProc = Start-Process -FilePath $launcherExe -ArgumentList "`"$testSm`"" -Wait -PassThru -NoNewWindow
+          Remove-Item $testSm
+          if ($launchProc.ExitCode -ne 0) {
+            throw "sm-launch exited with failure code on valid program: $($launchProc.ExitCode)"
+          }
+
+          Write-Host "7. Testing sm-launch with failing program (must fail)..."
+          $failSm = Join-Path $env:TEMP "ci_fail.sm"
+          [System.IO.File]::WriteAllText($failSm, "fn main() { assert(1 + 1 == 3); return; }")
+          $failProc = Start-Process -FilePath $launcherExe -ArgumentList "`"$failSm`"" -Wait -PassThru -NoNewWindow
+          Remove-Item $failSm
+          if ($failProc.ExitCode -eq 0) {
+            throw "sm-launch unexpectedly succeeded on failing assertion!"
+          }
+
+          Write-Host "8. Testing silent uninstaller (Fresh PATH case)..."
+          $uninst = Get-ChildItem -Path $tempDir -Filter "unins*.exe" | Select-Object -First 1
+          if ($null -eq $uninst) { throw "Uninstaller not found in $tempDir" }
+          $uninstProc = Start-Process -FilePath $uninst.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru -NoNewWindow
+          if ($uninstProc.ExitCode -ne 0) {
+            throw "Uninstaller exited with failure code: $($uninstProc.ExitCode)"
+          }
+
+          Start-Sleep -Seconds 2
+          Write-Host "9. Verifying bin directory and user PATH removed after uninstall..."
+          if (Test-Path (Join-Path $tempDir "bin")) {
+            throw "Directory '$tempDir\bin' still exists after uninstallation!"
+          }
+          $postUninstallPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($null -ne $postUninstallPath -and $postUninstallPath.Contains($binDir)) {
+            throw "User PATH still contains $binDir after uninstallation!"
+          }
+          if (Test-Path "HKCU:\Software\Semantic") {
+            throw "Registry key HKCU:\Software\Semantic still exists after uninstallation!"
+          }
+          if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
+
+          Write-Host "10. Testing Case B: Pre-existing user PATH preservation regression check..."
+          $caseBDir = Join-Path $env:TEMP "semantic-ci-case-b"
+          if (Test-Path $caseBDir) { Remove-Item -Recurse -Force $caseBDir }
+          $caseBBin = Join-Path $caseBDir "bin"
+          $dummyEntry = "C:\ci_dummy_preexisting_path"
+
+          # Pre-populate user PATH with dummy entry and caseBBin
+          $currPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($null -eq $currPath) { $currPath = "" }
+          $prePopPath = if ($currPath -eq "") { "$dummyEntry;$caseBBin" } else { "$currPath;$dummyEntry;$caseBBin" }
+          [Environment]::SetEnvironmentVariable("Path", $prePopPath, "User")
+
+          try {
+            Write-Host "  Installing over pre-existing PATH entries..."
+            $caseBInstall = Start-Process -FilePath "packaging/windows/dist/Semantic-Setup-x64.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$caseBDir`"", "/TASKS=`"envPath`"" -Wait -PassThru -NoNewWindow
+            if ($caseBInstall.ExitCode -ne 0) {
+              throw "Case B installer exited with code: $($caseBInstall.ExitCode)"
+            }
+
+            $caseBRegVal = (Get-ItemProperty -Path "HKCU:\Software\Semantic" -ErrorAction SilentlyContinue).AddedUserPath
+            if ($null -ne $caseBRegVal) {
+              throw "Case B: Expected AddedUserPath to NOT be written when PATH already existed, but found: $caseBRegVal"
+            }
+
+            Write-Host "  Uninstalling Case B..."
+            $caseBUninst = Get-ChildItem -Path $caseBDir -Filter "unins*.exe" | Select-Object -First 1
+            if ($null -eq $caseBUninst) { throw "Case B: Uninstaller not found" }
+            $caseBUninstProc = Start-Process -FilePath $caseBUninst.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru -NoNewWindow
+            if ($caseBUninstProc.ExitCode -ne 0) {
+              throw "Case B uninstaller exited with code: $($caseBUninstProc.ExitCode)"
+            }
+
+            Start-Sleep -Seconds 2
+            $caseBAfterUninstall = [Environment]::GetEnvironmentVariable("Path", "User")
+            if (-not $caseBAfterUninstall.Contains($dummyEntry)) {
+              throw "Case B: Pre-existing dummy entry was unexpectedly stripped from user PATH!"
+            }
+            if (-not $caseBAfterUninstall.Contains($caseBBin)) {
+              throw "Case B: Pre-existing binary entry was unexpectedly stripped from user PATH on uninstall!"
+            }
+            Write-Host "  Case B PATH preservation verified successfully."
+          } finally {
+            # Clean up dummy entry and caseBBin from user PATH
+            $cleanupPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            if ($null -ne $cleanupPath) {
+              $cleanParts = $cleanupPath.Split(';') | Where-Object { $_ -ne '' -and $_ -ne $dummyEntry -and $_ -ne $caseBBin }
+              [Environment]::SetEnvironmentVariable("Path", ($cleanParts -join ';'), "User")
+            }
+            if (Test-Path $caseBDir) { Remove-Item -Recurse -Force $caseBDir -ErrorAction SilentlyContinue }
+          }
+
+      - name: Upload Unsigned Installer and Provenance Manifest
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: Semantic-Setup-x64-preview
+          path: |
+            packaging/windows/dist/Semantic-Setup-x64.exe
+            build_provenance.json
+          if-no-files-found: error

@@ -1,51 +1,26 @@
-# Safe Native Launcher Architecture (`sm-launch`)
+# Native Launcher (`sm-launch.exe`)
 
-Status: Design Specification  
-Language: Rust / Native C
+The Native Launcher provides safe, single-click and command-line execution of `.sm` Semantic source files on Windows.
 
----
+## Canonical Architecture
 
-## Purpose
-
-`sm-launch` is a lightweight cross-platform binary wrapper installed alongside `smc` and `svm`. It serves as the primary OS entrypoint when a user double-clicks or shell-executes a `.sm` source file.
-
-## Execution Sequence
-
+The launcher invokes the installed Semantic compiler using the canonical execution command:
+```powershell
+smc run <file.sm>
 ```
-[OS Invocation: sm-launch "path/to/source.sm"]
-                        │
-                        ▼
-       [1. Parse & Normalize File Path]
-       - UTF-8 / Unicode handling
-       - Resolve canonical absolute path
-                        │
-                        ▼
-       [2. Inspect Origin Security Context]
-       - Windows: Check Zone.Identifier ADS == 3 (Internet)
-       - macOS: Check com.apple.quarantine
-       - If Remote:
-           Prompt user: "File downloaded from internet. Execute? [y/N]"
-           If user declines -> Exit with code 2
-                        │
-                        ▼
-       [3. Interactive Console Attachment]
-       - If running without parent console (GUI spawn):
-           Allocate new terminal console window
-                        │
-                        ▼
-       [4. Verifier Admission Gate]
-       - Execute: smc compile --verify-only "path/to/source.sm"
-       - If compile or verification fails:
-           Print diagnostic in red ANSI
-           Hold terminal window ("Press any key to exit...")
-           Exit with code 1
-                        │
-                        ▼
-       [5. Deterministic Execution]
-       - Execute: svm run-smc "path/to/source.smc"
-       - Capture stdout/stderr
-                        │
-                        ▼
-       [6. Completion Hold]
-       - If GUI allocated: Wait for user keypress before window close
-```
+This command compiles, verifies (via `sm-verify`), and executes the program on the virtual machine in a single step without exposing or executing unverified bytecode.
+
+## Security & Path Guarantees
+
+1. **Local Compiler Resolution**:
+   - `sm-launch.exe` resolves `smc.exe` strictly from its own installation directory (`{app}\bin`).
+   - It **never** resolves `smc.exe` from the current working directory or ambient `PATH` entries.
+2. **Path Sanitization**:
+   - Accepts exactly one source file parameter.
+   - Validates that the file exists, is not a directory, and has the `.sm` extension.
+   - Supports long paths, whitespace, and Unicode file names.
+3. **Double-Click & Download Protection**:
+   - Detects execution from Windows Explorer (`GetConsoleProcessList`).
+   - Inspects NTFS `Zone.Identifier` alternate data streams (files downloaded from untrusted internet origins).
+   - Displays a native execution confirmation dialog before running untrusted or Explorer-launched scripts.
+   - Keeps the console window open after completion when launched from Explorer, while running smoothly without pause when invoked from an existing terminal.
