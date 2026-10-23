@@ -25,3 +25,8 @@ Thumbs.db
 *.cer
 *.crt
 secring.gpg
+
+__pycache__/
+*.pyc
+.upstream_cache/
+
