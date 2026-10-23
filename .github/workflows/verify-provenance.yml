@@ -22,42 +22,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Validation Dependencies
-        run: pip install jsonschema
+      - name: Install Pinned Validation Dependencies
+        run: pip install --require-hashes -r ci/requirements.txt
 
-      - name: Validate Anchor Instance Against Schema
-        run: |
-          python -c "
-          import json, jsonschema
-          schema = json.load(open('manifests/anchor_schema.json'))
-          anchor = json.load(open('upstream_anchor.json'))
-          jsonschema.validate(instance=anchor, schema=schema)
-          print('Anchor schema validation: PASS')
-          "
-
-      - name: Fetch and Verify Upstream Tree at Pinned SHA
-        run: |
-          git clone --no-checkout https://github.com/skulmakov-oss/Semantic.git upstream_check
-          cd upstream_check
-          git checkout 1d1e76c7509a03baa0133abaaa5819f5d32582b2
-          
-          # Compute Git blob SHA-256 and Git object OID
-          ACTUAL_OID=$(git rev-parse HEAD:Cargo.lock)
-          ACTUAL_BLOB_SHA256=$(git cat-file -p HEAD:Cargo.lock | sha256sum | awk '{print $1}')
-          
-          EXPECTED_OID="6111b565dd0c71383e3f184ebdec23c4a502f58c"
-          EXPECTED_SHA256="5d85791ca1194f6fc6142ed96b1d3bf5ca0f4b05104689f824f364f7a4e6c0d8"
-          
-          echo "Comparing Git blob SHA256..."
-          if [ "$ACTUAL_BLOB_SHA256" != "$EXPECTED_SHA256" ]; then
-            echo "Cargo.lock blob hash mismatch! Got $ACTUAL_BLOB_SHA256 expected $EXPECTED_SHA256"
-            exit 1
-          fi
-          
-          echo "Comparing Git object OID..."
-          if [ "$ACTUAL_OID" != "$EXPECTED_OID" ]; then
-            echo "Cargo.lock Git OID mismatch! Got $ACTUAL_OID expected $EXPECTED_OID"
-            exit 1
-          fi
-          
-          echo "Canonical upstream provenance verified: PASS"
+      - name: Verify Upstream Provenance and Identity
+        run: python ci/verify_provenance.py

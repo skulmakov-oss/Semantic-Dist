@@ -1,0 +1,44 @@
+name: Trusted PR Admission & Scope Enforcement
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+
+jobs:
+  trusted-scope-admission:
+    name: Trusted PR Admission Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted BASE branch exclusively
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ github.base_ref }}
+          persist-credentials: false
+
+      - name: Fetch PR Candidate Object (As Untrusted Data Only)
+        run: |
+          # Fetch only the exact HEAD commit object into local git storage; do not check out
+          git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install Pinned Validation Dependencies
+        run: pip install --require-hashes -r ci/requirements.txt
+
+      - name: Execute Immutable Base-Side Trusted Checker
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python ci/trusted_pr_checker.py "$BASE_SHA" "$HEAD_SHA"
