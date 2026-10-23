@@ -59,7 +59,6 @@ jobs:
           if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --no-progress -y
           }
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /?
 
       - name: Compile Inno Setup Installer
         run: |
