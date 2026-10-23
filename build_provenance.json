@@ -3,7 +3,7 @@
   "product_version": "1.3.0-beta.1",
   "release_channel": "developer-preview",
   "classification": "Unsigned Developer Preview \u2014 Not a Published Release",
-  "generated_at": "2026-10-23T19:24:58.799841+00:00",
+  "generated_at": "2026-10-23T20:55:08.861719+00:00",
   "workflow_run_identity": {
     "github_run_id": "local",
     "github_run_attempt": "1",
@@ -23,8 +23,8 @@
   "artifacts": {
     "installer": {
       "filename": "Semantic-Setup-x64.exe",
-      "sha256": "278e3d9c498bada7cbc2958bb34045ebda7461329c633fc880edaed0435ffbbc",
-      "bytes": 3719110
+      "sha256": "9e22d2963994583cf1c1f9bd483fc99794d5c2a40fd3d6f85793f1e8e98bae58",
+      "bytes": 3719098
     },
     "binaries": {
       "smc.exe": {
@@ -36,7 +36,7 @@
         "bytes": 547840
       },
       "sm-launch.exe": {
-        "sha256": "99c9eb58b4700b3d1b543fa22fb1aee76d50de9788719a0bff2b13e5467dcf57",
+        "sha256": "ca3824cf37111cca93b7bdca8bf21f5508094dc1d001102e159bf99293e887fa",
         "bytes": 254464
       }
     }

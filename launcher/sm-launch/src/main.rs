@@ -154,9 +154,8 @@ fn run_launcher() -> Result<i32, String> {
     let args: Vec<String> = env::args().collect();
     let source_path = validate_source_argument(&args)?;
 
-    let is_noninteractive = env::var("SEMANTIC_LAUNCH_NONINTERACTIVE").map(|v| v == "1").unwrap_or(false);
-    let is_explorer = !is_noninteractive && win_util::is_launched_from_explorer();
-    let is_zone_untrusted = !is_noninteractive && check_zone_identifier(&source_path);
+    let is_explorer = win_util::is_launched_from_explorer();
+    let is_zone_untrusted = check_zone_identifier(&source_path);
 
     if is_explorer || is_zone_untrusted {
         let file_name = source_path

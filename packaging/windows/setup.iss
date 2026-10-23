@@ -51,7 +51,7 @@ Source: "..\..\LICENSE"; DestDir: "{app}\docs"; Flags: ignoreversion
 ; PATH environment variable update (User PATH)
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{code:GetNewPath}"; Tasks: envPath; Check: NeedsAddPath(ExpandConstant('{app}\bin'))
 ; Record whether installer actually added PATH so uninstaller only removes if added by setup
-Root: HKCU; Subkey: "Software\Semantic"; ValueType: dword; ValueName: "AddedUserPath"; ValueData: 1; Flags: uninsdeletekey; Tasks: envPath
+; AddedUserPath tracked via CurStepChanged
 
 ; File association for .sm
 Root: HKCU; Subkey: "Software\Classes\.sm"; ValueType: string; ValueName: ""; ValueData: "Semantic.SourceFile.1"; Flags: uninsdeletevalue; Tasks: assocSm
@@ -142,6 +142,24 @@ begin
   RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', CleanedPath);
 end;
 
+
+var
+  ShouldAddUserPath: Boolean;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+  begin
+    ShouldAddUserPath := WizardIsTaskSelected('envPath') and NeedsAddPath(ExpandConstant('{app}\bin'));
+  end;
+  if CurStep = ssPostInstall then
+  begin
+    if ShouldAddUserPath then
+    begin
+      RegWriteDWordValue(HKEY_CURRENT_USER, 'Software\Semantic', 'AddedUserPath', 1);
+    end;
+  end;
+end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   AddedPathVal: Cardinal;
@@ -152,6 +170,8 @@ begin
     if RegQueryDWordValue(HKEY_CURRENT_USER, 'Software\Semantic', 'AddedUserPath', AddedPathVal) and (AddedPathVal = 1) then
     begin
       RemovePath(ExpandConstant('{app}\bin'));
+      RegDeleteValue(HKEY_CURRENT_USER, 'Software\Semantic', 'AddedUserPath');
+      RegDeleteKeyIfEmpty(HKEY_CURRENT_USER, 'Software\Semantic');
     end;
   end;
 end;
