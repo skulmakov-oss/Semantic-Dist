@@ -1,0 +1,84 @@
+name: Build Windows x64 Installer (Developer Preview)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-installer:
+    name: Build Windows x64 Installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout distribution repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install Pinned Validation Dependencies
+        run: pip install --require-hashes -r ci/requirements.txt
+
+      - name: Verify Upstream Provenance Before Build
+        run: python ci/verify_provenance.py
+
+      - name: Install Rust Toolchain 1.97.1
+        uses: dtolnay/rust-toolchain@4dd2834b79c3b88b0a1d4734a6ef455325883ef5
+        with:
+          toolchain: "1.97.1"
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Native Launcher
+        run: |
+          cd launcher/sm-launch
+          cargo test --locked
+          cargo build --locked --release
+
+      - name: Clone and Verify Pinned Upstream Semantic
+        run: |
+          git clone --no-checkout https://github.com/skulmakov-oss/Semantic.git upstream
+          cd upstream
+          git checkout 1d1e76c7509a03baa0133abaaa5819f5d32582b2
+          cargo build --locked --release --bin smc --bin svm
+
+      - name: Stage Artifacts
+        run: |
+          mkdir -p dist-staging/bin
+          cp upstream/target/release/smc.exe dist-staging/bin/
+          cp upstream/target/release/svm.exe dist-staging/bin/
+          cp launcher/sm-launch/target/release/sm-launch.exe dist-staging/bin/
+        shell: bash
+
+      - name: Install Inno Setup
+        run: choco install innosetup --version=6.2.2 --no-progress -y
+
+      - name: Compile Inno Setup Installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/windows/setup.iss
+
+      - name: Run Noninteractive Smoke Check
+        run: |
+          $tempDir = Join-Path $env:TEMP "semantic-ci-test"
+          & packaging/windows/dist/Semantic-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$tempDir"
+          Start-Sleep -Seconds 2
+          & "$tempDir\bin\smc.exe" version
+          & "$tempDir\bin\svm.exe" --help
+          $testSm = Join-Path $env:TEMP "ci_test.sm"
+          [System.IO.File]::WriteAllText($testSm, "fn main() { assert(1 + 1 == 2); return; }")
+          & "$tempDir\bin\sm-launch.exe" $testSm
+          Remove-Item $testSm
+          $uninst = Get-ChildItem -Path $tempDir -Filter "unins*.exe" | Select-Object -First 1
+          & $uninst.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          Start-Sleep -Seconds 2
+
+      - name: Upload Unsigned Installer Artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: Semantic-Setup-x64-preview
+          path: packaging/windows/dist/Semantic-Setup-x64.exe
+          if-no-files-found: error
