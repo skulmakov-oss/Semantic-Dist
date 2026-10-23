@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BuildProvenance",
+  "type": "object",
+  "required": [
+    "provenance_version",
+    "build_timestamp",
+    "upstream_source",
+    "distribution_repo",
+    "build_environment",
+    "artifacts"
+  ],
+  "properties": {
+    "provenance_version": { "type": "string", "enum": ["1.0.0"] },
+    "build_timestamp": { "type": "string", "format": "date-time" },
+    "upstream_source": {
+      "type": "object",
+      "required": ["repository", "pinned_commit_sha", "cargo_lock_sha256"],
+      "properties": {
+        "repository": { "type": "string" },
+        "pinned_commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "cargo_lock_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "distribution_repo": {
+      "type": "object",
+      "required": ["commit_sha", "tag"],
+      "properties": {
+        "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tag": { "type": "string" }
+      }
+    },
+    "build_environment": {
+      "type": "object",
+      "required": ["os", "runner_id", "rust_version", "target_triple"],
+      "properties": {
+        "os": { "type": "string" },
+        "runner_id": { "type": "string" },
+        "rust_version": { "type": "string" },
+        "target_triple": { "type": "string" }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file_name", "sha256", "size_bytes", "platform", "signing_status"],
+        "properties": {
+          "file_name": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "size_bytes": { "type": "integer" },
+          "platform": { "type": "string" },
+          "signing_status": { "type": "string", "enum": ["unsigned", "signed_authenticode", "signed_apple_notarized"] }
+        }
+      }
+    }
+  }
+}

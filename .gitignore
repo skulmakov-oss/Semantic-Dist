@@ -1,0 +1,27 @@
+# Build & Distribution Artifacts
+target/
+dist/
+out/
+*.zip
+*.tar.gz
+*.exe
+*.deb
+*.pkg
+*.dmg
+
+# OS & Editor Artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+.idea/
+.vscode/
+
+# Signing & Key Material (Strictly Ignored)
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+secring.gpg

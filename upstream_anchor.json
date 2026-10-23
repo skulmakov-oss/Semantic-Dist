@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-10-23T07:40:00Z",
+  "canonical_upstream": {
+    "repository_url": "https://github.com/skulmakov-oss/Semantic",
+    "pinned_commit_sha": "1d1e76c7509a03baa0133abaaa5819f5d32582b2",
+    "upstream_reference_label": "main@1d1e76c7",
+    "verified_features": [
+      "S2044-text-literal-boundary-E0005",
+      "S2043-bundle-module-display-path",
+      "quad-logic-frame-v1",
+      "package-baseline-v0"
+    ],
+    "cargo_lock_blob_sha256": "5d85791ca1194f6fc6142ed96b1d3bf5ca0f4b05104689f824f364f7a4e6c0d8",
+    "cargo_lock_blob_git_oid": "6111b565dd0c71383e3f184ebdec23c4a502f58c",
+    "rust_toolchain": {
+      "channel": "1.97.1",
+      "profile": "minimal",
+      "components": ["rustfmt", "clippy"]
+    }
+  },
+  "distribution_target": {
+    "product_name": "Semantic",
+    "proposed_version": "1.3.0-beta.1",
+    "release_channel": "prerelease",
+    "semcode_policy": {
+      "emission_default_header": "SEMCOD22",
+      "emission_default_rev": 23,
+      "supported_revisions_range": {
+        "min_rev": 1,
+        "max_rev": 26
+      },
+      "supported_headers_total_count": 26,
+      "feature_triggered_revisions": {
+        "SEMCOD23_rev24": "plain u32 arithmetic (SHF-3A2)",
+        "SEMCOD24_rev25": "Bytes value operations",
+        "SEMCOD25_rev26": "Bytes endian conversion"
+      },
+      "verifier_rule": "strict-fail-closed",
+      "legacy_revisions_recompilation_required": true
+    },
+    "expected_binaries": [
+      {
+        "name": "smc",
+        "description": "Semantic Compiler CLI",
+        "windows_name": "smc.exe"
+      },
+      {
+        "name": "svm",
+        "description": "Semantic Deterministic Virtual Machine",
+        "windows_name": "svm.exe"
+      },
+      {
+        "name": "sm-launch",
+        "description": "Semantic Safe Native Launcher & File Association Guard",
+        "windows_name": "sm-launch.exe"
+      }
+    ]
+  },
+  "provenance_policy": {
+    "immutable_checkout_required": true,
+    "automatic_tracking_of_upstream_main": false,
+    "require_clean_git_tree": true,
+    "require_lockfile_hash_match": true
+  }
+}

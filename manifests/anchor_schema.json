@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/skulmakov-oss/Semantic-Dist/main/manifests/anchor_schema.json",
+  "title": "SemanticUpstreamAnchor",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "canonical_upstream",
+    "distribution_target",
+    "provenance_policy"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1.0.0"] },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "canonical_upstream": {
+      "type": "object",
+      "required": [
+        "repository_url",
+        "pinned_commit_sha",
+        "upstream_reference_label",
+        "cargo_lock_blob_sha256",
+        "cargo_lock_blob_git_oid",
+        "rust_toolchain"
+      ],
+      "properties": {
+        "repository_url": { "type": "string", "format": "uri" },
+        "pinned_commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "upstream_reference_label": { "type": "string" },
+        "verified_features": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "cargo_lock_blob_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "cargo_lock_blob_git_oid": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "rust_toolchain": {
+          "type": "object",
+          "required": ["channel", "profile", "components"],
+          "properties": {
+            "channel": { "type": "string" },
+            "profile": { "type": "string" },
+            "components": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "distribution_target": {
+      "type": "object",
+      "required": [
+        "product_name",
+        "proposed_version",
+        "release_channel",
+        "semcode_policy",
+        "expected_binaries"
+      ],
+      "properties": {
+        "product_name": { "type": "string" },
+        "proposed_version": { "type": "string" },
+        "release_channel": { "type": "string" },
+        "semcode_policy": {
+          "type": "object",
+          "required": [
+            "emission_default_header",
+            "emission_default_rev",
+            "supported_revisions_range",
+            "supported_headers_total_count",
+            "verifier_rule"
+          ],
+          "properties": {
+            "emission_default_header": { "type": "string" },
+            "emission_default_rev": { "type": "integer" },
+            "supported_revisions_range": {
+              "type": "object",
+              "required": ["min_rev", "max_rev"],
+              "properties": {
+                "min_rev": { "type": "integer" },
+                "max_rev": { "type": "integer" }
+              }
+            },
+            "supported_headers_total_count": { "type": "integer" },
+            "feature_triggered_revisions": { "type": "object" },
+            "verifier_rule": { "type": "string" },
+            "legacy_revisions_recompilation_required": { "type": "boolean" }
+          }
+        },
+        "expected_binaries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "windows_name"],
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "windows_name": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "provenance_policy": {
+      "type": "object",
+      "required": [
+        "immutable_checkout_required",
+        "automatic_tracking_of_upstream_main",
+        "require_clean_git_tree",
+        "require_lockfile_hash_match"
+      ],
+      "properties": {
+        "immutable_checkout_required": { "type": "boolean" },
+        "automatic_tracking_of_upstream_main": { "type": "boolean" },
+        "require_clean_git_tree": { "type": "boolean" },
+        "require_lockfile_hash_match": { "type": "boolean" }
+      }
+    }
+  }
+}
