@@ -49,7 +49,9 @@ Source: "..\..\LICENSE"; DestDir: "{app}\docs"; Flags: ignoreversion
 
 [Registry]
 ; PATH environment variable update (User PATH)
-Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}\bin"; Tasks: envPath; Check: NeedsAddPath(ExpandConstant('{app}\bin'))
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{code:GetNewPath}"; Tasks: envPath; Check: NeedsAddPath(ExpandConstant('{app}\bin'))
+; Record whether installer actually added PATH so uninstaller only removes if added by setup
+Root: HKCU; Subkey: "Software\Semantic"; ValueType: dword; ValueName: "AddedUserPath"; ValueData: 1; Flags: uninsdeletekey; Tasks: envPath
 
 ; File association for .sm
 Root: HKCU; Subkey: "Software\Classes\.sm"; ValueType: string; ValueName: ""; ValueData: "Semantic.SourceFile.1"; Flags: uninsdeletevalue; Tasks: assocSm
@@ -60,46 +62,96 @@ Root: HKCU; Subkey: "Software\Classes\Semantic.SourceFile.1\DefaultIcon"; ValueT
 Root: HKCU; Subkey: "Software\Classes\Semantic.SourceFile.1\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\sm-launch.exe"" ""%1"""; Tasks: assocSm
 
 [Code]
-// Helper function to prevent duplicate PATH entries
+// Helper function to check if bin directory is already in user PATH
 function NeedsAddPath(Param: string): boolean;
 var
-  OrigPath: string;
+  OrigPath, TargetPart: string;
 begin
   if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
   begin
     Result := True;
     exit;
   end;
-  // Look for the path with semicolons surrounding it
-  Result := Pos(';' + UpperCase(Param) + ';', ';' + UpperCase(OrigPath) + ';') = 0;
+  TargetPart := ';' + UpperCase(Trim(Param)) + ';';
+  Result := Pos(TargetPart, ';' + UpperCase(OrigPath) + ';') = 0;
 end;
 
-procedure RemovePath(Param: string);
+// Helper to calculate new PATH without introducing duplicate semicolons
+function GetNewPath(Param: string): string;
 var
-  OrigPath, NewPath: string;
-  P, L: Integer;
+  OrigPath, BinDir: string;
 begin
+  BinDir := ExpandConstant('{app}\bin');
   if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
   begin
-    NewPath := OrigPath;
-    Param := UpperCase(Param);
-    P := Pos(';' + Param + ';', ';' + UpperCase(NewPath) + ';');
-    if P > 0 then
+    OrigPath := Trim(OrigPath);
+    if OrigPath = '' then
+      Result := BinDir
+    else if (OrigPath[Length(OrigPath)] = ';') then
+      Result := OrigPath + BinDir
+    else
+      Result := OrigPath + ';' + BinDir;
+  end
+  else
+    Result := BinDir;
+end;
+
+procedure RemovePath(BinDir: string);
+var
+  OrigPath, NormPath, CleanedPath: string;
+  SemiPos: Integer;
+  Segment: string;
+  First: Boolean;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
+    exit;
+
+  NormPath := Trim(OrigPath);
+  if NormPath = '' then
+    exit;
+
+  CleanedPath := '';
+  First := True;
+
+  while Length(NormPath) > 0 do
+  begin
+    SemiPos := Pos(';', NormPath);
+    if SemiPos > 0 then
     begin
-      L := Length(Param);
-      if (P = 1) then
-        Delete(NewPath, 1, L + 1)
+      Segment := Trim(Copy(NormPath, 1, SemiPos - 1));
+      Delete(NormPath, 1, SemiPos);
+    end
+    else
+    begin
+      Segment := Trim(NormPath);
+      NormPath := '';
+    end;
+
+    if (Segment <> '') and (CompareText(Segment, BinDir) <> 0) then
+    begin
+      if First then
+      begin
+        CleanedPath := Segment;
+        First := False;
+      end
       else
-        Delete(NewPath, P - 1, L + 1);
-      RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath);
+        CleanedPath := CleanedPath + ';' + Segment;
     end;
   end;
+
+  RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', CleanedPath);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AddedPathVal: Cardinal;
 begin
   if CurUninstallStep = usUninstall then
   begin
-    RemovePath(ExpandConstant('{app}\bin'));
+    // Only remove PATH if this installation recorded that it modified user PATH
+    if RegQueryDWordValue(HKEY_CURRENT_USER, 'Software\Semantic', 'AddedUserPath', AddedPathVal) and (AddedPathVal = 1) then
+    begin
+      RemovePath(ExpandConstant('{app}\bin'));
+    end;
   end;
 end;

@@ -64,24 +64,94 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/windows/setup.iss
 
-      - name: Run Noninteractive Smoke Check
-        run: |
-          $tempDir = Join-Path $env:TEMP "semantic-ci-test"
-          & packaging/windows/dist/Semantic-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$tempDir"
-          Start-Sleep -Seconds 2
-          & "$tempDir\bin\smc.exe" version
-          & "$tempDir\bin\svm.exe" --help
-          $testSm = Join-Path $env:TEMP "ci_test.sm"
-          [System.IO.File]::WriteAllText($testSm, "fn main() { assert(1 + 1 == 2); return; }")
-          & "$tempDir\bin\sm-launch.exe" $testSm
-          Remove-Item $testSm
-          $uninst = Get-ChildItem -Path $tempDir -Filter "unins*.exe" | Select-Object -First 1
-          & $uninst.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-          Start-Sleep -Seconds 2
+      - name: Generate Build Provenance Metadata
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: python ci/generate_build_provenance.py
 
-      - name: Upload Unsigned Installer Artifact
+      - name: Run Noninteractive Smoke Check (Strict Exit Code Validation)
+        shell: powershell
+        env:
+          SEMANTIC_LAUNCH_NONINTERACTIVE: "1"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tempDir = Join-Path $env:TEMP "semantic-ci-test"
+          if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
+
+          Write-Host "1. Running silent installer..."
+          $installProc = Start-Process -FilePath "packaging/windows/dist/Semantic-Setup-x64.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$tempDir`"" -Wait -PassThru
+          if ($installProc.ExitCode -ne 0) {
+            throw "Installer exited with failure code: $($installProc.ExitCode)"
+          }
+
+          Write-Host "2. Verifying installed files exist..."
+          $smcExe = Join-Path $tempDir "bin\smc.exe"
+          $svmExe = Join-Path $tempDir "bin\svm.exe"
+          $launcherExe = Join-Path $tempDir "bin\sm-launch.exe"
+          foreach ($f in @($smcExe, $svmExe, $launcherExe)) {
+            if (-not (Test-Path $f)) { throw "Expected installed binary missing: $f" }
+          }
+
+          Write-Host "3. Testing smc version..."
+          $smcVerProc = Start-Process -FilePath $smcExe -ArgumentList "version" -Wait -PassThru
+          if ($smcVerProc.ExitCode -ne 0) {
+            throw "smc version exited with failure code: $($smcVerProc.ExitCode)"
+          }
+
+          Write-Host "4. Testing svm with compiled bytecode..."
+          $testSmComp = Join-Path $env:TEMP "ci_compile_test.sm"
+          $testSmc = Join-Path $env:TEMP "ci_compile_test.smc"
+          [System.IO.File]::WriteAllText($testSmComp, "fn main() { return; }")
+          $smcCompProc = Start-Process -FilePath $smcExe -ArgumentList "compile `"$testSmComp`" -o `"$testSmc`"" -Wait -PassThru
+          Remove-Item $testSmComp
+          if ($smcCompProc.ExitCode -ne 0) {
+            throw "smc compile exited with failure code: $($smcCompProc.ExitCode)"
+          }
+          $svmRunProc = Start-Process -FilePath $svmExe -ArgumentList "run `"$testSmc`"" -Wait -PassThru
+          Remove-Item $testSmc
+          if ($svmRunProc.ExitCode -ne 0) {
+            throw "svm run exited with failure code: $($svmRunProc.ExitCode)"
+          }
+
+          Write-Host "5. Testing sm-launch with valid program..."
+          $testSm = Join-Path $env:TEMP "ci_valid.sm"
+          [System.IO.File]::WriteAllText($testSm, "fn main() { assert(1 + 1 == 2); return; }")
+          $launchProc = Start-Process -FilePath $launcherExe -ArgumentList "`"$testSm`"" -Wait -PassThru
+          Remove-Item $testSm
+          if ($launchProc.ExitCode -ne 0) {
+            throw "sm-launch exited with failure code on valid program: $($launchProc.ExitCode)"
+          }
+
+          Write-Host "6. Testing sm-launch with failing program (must fail)..."
+          $failSm = Join-Path $env:TEMP "ci_fail.sm"
+          [System.IO.File]::WriteAllText($failSm, "fn main() { assert(1 + 1 == 3); return; }")
+          $failProc = Start-Process -FilePath $launcherExe -ArgumentList "`"$failSm`"" -Wait -PassThru
+          Remove-Item $failSm
+          if ($failProc.ExitCode -eq 0) {
+            throw "sm-launch unexpectedly succeeded on failing assertion!"
+          }
+
+          Write-Host "7. Testing silent uninstaller..."
+          $uninst = Get-ChildItem -Path $tempDir -Filter "unins*.exe" | Select-Object -First 1
+          if ($null -eq $uninst) { throw "Uninstaller not found in $tempDir" }
+          $uninstProc = Start-Process -FilePath $uninst.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($uninstProc.ExitCode -ne 0) {
+            throw "Uninstaller exited with failure code: $($uninstProc.ExitCode)"
+          }
+
+          Start-Sleep -Seconds 2
+          Write-Host "8. Verifying files and directory are removed after uninstall..."
+          if (Test-Path (Join-Path $tempDir "bin")) {
+            throw "Directory '$tempDir\bin' still exists after uninstallation!"
+          }
+
+      - name: Upload Unsigned Installer and Provenance Manifest
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: Semantic-Setup-x64-preview
-          path: packaging/windows/dist/Semantic-Setup-x64.exe
+          path: |
+            packaging/windows/dist/Semantic-Setup-x64.exe
+            build_provenance.json
           if-no-files-found: error
