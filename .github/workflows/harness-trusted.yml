@@ -38,6 +38,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Verify Base Checkout Provenance
@@ -61,8 +62,8 @@ jobs:
 
       - name: Fetch PR Candidate Object (As Untrusted Data Only)
         run: |
-          # Fetch only the exact HEAD commit object into local git storage; do not check out
-          git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.head.sha }}
+          # Fetch candidate commit and sufficient ancestry to resolve merge-base against base history
+          git fetch --no-tags origin ${{ github.event.pull_request.head.sha }}
           # Verify fetched commit exists
           git cat-file -t ${{ github.event.pull_request.head.sha }} > /dev/null
 
