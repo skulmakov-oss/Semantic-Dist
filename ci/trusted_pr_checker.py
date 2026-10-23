@@ -20,13 +20,37 @@ import hashlib
 from pathlib import Path
 
 # Paths that are strictly protected from modification by ordinary PRs
-PROTECTED_CONTROL_PLANE = {
-    ".github/workflows/harness-trusted.yml",
+PROTECTED_CONTROL_PLANE_EXACT = {
     "ci/trusted_pr_checker.py",
+    "ci/verify_provenance.py",
+    "ci/requirements.txt",
+    "ci/requirements.in",
+    "manifests/anchor_schema.json",
+    "AGENTS.md",
+    "SECURITY.md",
 }
 
-# The pinned upstream commit SHA authorized by the repository owner
-FROZEN_UPSTREAM_SHA = "1d1e76c7509a03baa0133abaaa5819f5d32582b2"
+PROTECTED_CONTROL_PLANE_PREFIXES = (
+    ".github/workflows/",
+)
+
+def is_protected_control_plane(path_str: str) -> bool:
+    normalized = path_str.replace("\\", "/")
+    if normalized in PROTECTED_CONTROL_PLANE_EXACT:
+        return True
+    for prefix in PROTECTED_CONTROL_PLANE_PREFIXES:
+        if normalized.startswith(prefix):
+            return True
+    return False
+
+# Immutable upstream anchor invariants authorized by repository governance
+FROZEN_UPSTREAM = {
+    "repository_url": "https://github.com/skulmakov-oss/Semantic",
+    "pinned_commit_sha": "1d1e76c7509a03baa0133abaaa5819f5d32582b2",
+    "cargo_lock_blob_sha256": "5d85791ca1194f6fc6142ed96b1d3bf5ca0f4b05104689f824f364f7a4e6c0d8",
+    "cargo_lock_blob_git_oid": "6111b565dd0c71383e3f184ebdec23c4a502f58c",
+    "rust_toolchain_channel": "1.97.1",
+}
 
 def fail(msg: str, code: int = 1):
     print(f"[trusted-checker:error] {msg}", file=sys.stderr)
@@ -70,9 +94,8 @@ def check_admission(base_sha: str, head_sha: str, repo_root: Path):
 
     # 3. Guard against tampering with the trusted control plane
     for p in changed_paths:
-        normalized_p = p.replace("\\", "/")
-        if normalized_p in PROTECTED_CONTROL_PLANE:
-            fail(f"unauthorized-control-plane-modification path={normalized_p}")
+        if is_protected_control_plane(p):
+            fail(f"unauthorized-control-plane-modification path={p.replace('\\', '/')}")
 
     # 4. If upstream_anchor.json is touched, validate candidate content as pure data
     if "upstream_anchor.json" in changed_paths:
@@ -101,10 +124,24 @@ def check_admission(base_sha: str, head_sha: str, repo_root: Path):
         except Exception as e:
             fail(f"Candidate upstream_anchor.json fails schema validation: {e}")
 
-        # Check pinned upstream commit immutability
-        candidate_sha = candidate_anchor.get("canonical_upstream", {}).get("pinned_commit_sha")
-        if candidate_sha != FROZEN_UPSTREAM_SHA:
-            fail(f"unauthorized-upstream-sha-transition candidate={candidate_sha} expected={FROZEN_UPSTREAM_SHA}")
+        # Check immutable canonical upstream invariants
+        upstream = candidate_anchor.get("canonical_upstream", {})
+        if upstream.get("repository_url") != FROZEN_UPSTREAM["repository_url"]:
+            fail(f"unauthorized-upstream-repo-transition candidate={upstream.get('repository_url')} expected={FROZEN_UPSTREAM['repository_url']}")
+
+        candidate_sha = upstream.get("pinned_commit_sha")
+        if candidate_sha != FROZEN_UPSTREAM["pinned_commit_sha"]:
+            fail(f"unauthorized-upstream-sha-transition candidate={candidate_sha} expected={FROZEN_UPSTREAM['pinned_commit_sha']}")
+
+        if upstream.get("cargo_lock_blob_sha256") != FROZEN_UPSTREAM["cargo_lock_blob_sha256"]:
+            fail(f"unauthorized-cargo-lock-sha256-transition candidate={upstream.get('cargo_lock_blob_sha256')} expected={FROZEN_UPSTREAM['cargo_lock_blob_sha256']}")
+
+        if upstream.get("cargo_lock_blob_git_oid") != FROZEN_UPSTREAM["cargo_lock_blob_git_oid"]:
+            fail(f"unauthorized-cargo-lock-oid-transition candidate={upstream.get('cargo_lock_blob_git_oid')} expected={FROZEN_UPSTREAM['cargo_lock_blob_git_oid']}")
+
+        toolchain_channel = upstream.get("rust_toolchain", {}).get("channel")
+        if toolchain_channel != FROZEN_UPSTREAM["rust_toolchain_channel"]:
+            fail(f"unauthorized-toolchain-channel-transition candidate={toolchain_channel} expected={FROZEN_UPSTREAM['rust_toolchain_channel']}")
 
         # Check SemCode policy validity
         policy = candidate_anchor.get("distribution_target", {}).get("semcode_policy", {})

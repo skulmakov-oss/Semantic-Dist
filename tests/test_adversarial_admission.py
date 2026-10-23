@@ -165,6 +165,62 @@ class TestAdversarialAdmissionAndProvenance(unittest.TestCase):
             self.assertNotEqual(ret, 0)
             self.assertIn("unauthorized-control-plane-modification path=ci/trusted_pr_checker.py", stderr)
 
+    def test_08b_unauthorized_any_workflow_modification(self):
+        """Test 8b: Attempt to modify verify-provenance.yml fails closed."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo, base_sha = self.create_fixture_base_and_candidate(tmp_dir)
+            wf_file = tmp_repo / ".github" / "workflows" / "verify-provenance.yml"
+            wf_file.write_text("# malicious workflow change\n", encoding="utf-8")
+            self.run_cmd(["git", "add", ".github/workflows/verify-provenance.yml"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "touch other workflow"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            bad_head_sha = out.strip()
+
+            ret, stdout, stderr = self.run_cmd(
+                [sys.executable, str(CI_DIR / "trusted_pr_checker.py"), base_sha, bad_head_sha, str(tmp_repo)],
+                cwd=REPO_ROOT
+            )
+            self.assertNotEqual(ret, 0)
+            self.assertIn("unauthorized-control-plane-modification path=.github/workflows/verify-provenance.yml", stderr)
+
+    def test_08c_unauthorized_governance_file_modification(self):
+        """Test 8c: Attempt to modify AGENTS.md or SECURITY.md fails closed."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo, base_sha = self.create_fixture_base_and_candidate(tmp_dir)
+            sec_file = tmp_repo / "SECURITY.md"
+            sec_file.write_text("# weakened security policy\n", encoding="utf-8")
+            self.run_cmd(["git", "add", "SECURITY.md"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "touch SECURITY.md"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            bad_head_sha = out.strip()
+
+            ret, stdout, stderr = self.run_cmd(
+                [sys.executable, str(CI_DIR / "trusted_pr_checker.py"), base_sha, bad_head_sha, str(tmp_repo)],
+                cwd=REPO_ROOT
+            )
+            self.assertNotEqual(ret, 0)
+            self.assertIn("unauthorized-control-plane-modification path=SECURITY.md", stderr)
+
+    def test_08d_unauthorized_upstream_repo_transition(self):
+        """Test 8d: Attempt to point upstream to an unauthorized repo fails closed."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo, base_sha = self.create_fixture_base_and_candidate(tmp_dir)
+            anchor_file = tmp_repo / "upstream_anchor.json"
+            data = json.loads(anchor_file.read_text(encoding="utf-8"))
+            data["canonical_upstream"]["repository_url"] = "https://github.com/attacker-oss/Semantic"
+            anchor_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            self.run_cmd(["git", "add", "upstream_anchor.json"], cwd=tmp_repo)
+            self.run_cmd(["git", "commit", "-m", "point to attacker repo"], cwd=tmp_repo)
+            ret, out, _ = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=tmp_repo)
+            bad_head_sha = out.strip()
+
+            ret, stdout, stderr = self.run_cmd(
+                [sys.executable, str(CI_DIR / "trusted_pr_checker.py"), base_sha, bad_head_sha, str(tmp_repo)],
+                cwd=REPO_ROOT
+            )
+            self.assertNotEqual(ret, 0)
+            self.assertIn("unauthorized-upstream-repo-transition", stderr)
+
     def test_09_candidate_changes_ordinary_documentation_only(self):
         """Test 9: Candidate modifying only documentation passes trusted admission."""
         with tempfile.TemporaryDirectory() as tmp_dir:
