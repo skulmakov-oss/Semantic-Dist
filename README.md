@@ -22,6 +22,17 @@ The Windows x64 installer (`Semantic-Setup-x64.exe`) provides a complete, self-c
 - **File Association**: Associates `.sm` files with `sm-launch.exe` (`Semantic.SourceFile.1`).
 - **Optional PATH integration**: Adds `Semantic\bin` to the user's `PATH`.
 
+### What this installer contains — and what it does not
+- **It contains:** the Rust toolchain built from the pinned upstream commit `1d1e76c7` (`smc`, `svm`) and the `sm-launch` launcher.
+- **It does not contain:** the **self-hosted compiler**. That compiler is written in Semantic and reached a byte-identical `C1 = C2 = C3` fixed point on 2026-11-25. It is developed and qualified in [Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language), and its Bootstrap Seal is validated, not reproduced or accepted.
+- **Default compiler:** the installed `smc` remains the Rust reference compiler. Nothing in this package replaces it.
+
+### Known issue (upstream)
+A VM liveness regression in `skulmakov-oss/Semantic` (`aff35531`, included in the pinned `1d1e76c7`) affects this preview:
+- **Effect:** a program admitted by `smc verify` can stop at run time with `read uninitialized reg rN` after a call to a function whose result is discarded. It fails closed; no wrong value was observed.
+- **Not affected:** v1.2.0.
+- **Fix:** [skulmakov-oss/Semantic#2087](https://github.com/skulmakov-oss/Semantic/pull/2087). A packaging update needs a new upstream pin under this repository's release policy.
+
 ### Running Semantic Programs
 From PowerShell or CMD:
 ```powershell
