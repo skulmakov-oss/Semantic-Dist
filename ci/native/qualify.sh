@@ -18,12 +18,23 @@ TOOLS="$HERE/nq_tools.py"
 
 UP="$CAND"                                       # pinned upstream (upstream_anchor.json)
 
-C0=1d1e76c7509a03baa0133abaaa5819f5d32582b2      # historical C0 (frozen)
+# Self-hosted compiler identities come from manifests/selfhost_pin.json (the
+# distribution's single source of truth), so a manifest change is qualified
+# against what it declares. The frozen executor, the reproduction tooling and
+# the counters are contract constants of Bootstrap Contract v4 and stay here.
+manifest() { python -c 'import json,sys;d=json.load(open("manifests/selfhost_pin.json"))
+for k in sys.argv[1].split("."): d=d[k]
+print(d)' "$1" | tr -d '\r'; }
+C0="$(manifest c0_reference.commit)"
+SLS="$(manifest self_hosted_compiler.commit)"
+C1_SHA="$(manifest self_hosted_compiler.c1_sha256)"
+C1_BYTES="$(manifest self_hosted_compiler.c1_bytes)"
+for v in "$C0" "$SLS"; do [[ "$v" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid manifest commit: $v"; exit 1; }; done
+[[ "$C1_SHA" =~ ^[0-9a-f]{64}$ && "$C1_BYTES" =~ ^[0-9]+$ ]] || { echo "invalid manifest C1 identity"; exit 1; }
+LOCK_SHA="$(python -c 'import json;print(json.load(open("upstream_anchor.json"))["canonical_upstream"]["cargo_lock_blob_sha256"])' | tr -d '\r')"
+[[ "$LOCK_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid anchor Cargo.lock digest"; exit 1; }
 EXEC=825deca47f7e415e27b1e5f845a1c3030ea92300    # frozen normative executor
-SLS=5b404e5fbf487f05106617576eddefdb1cea1a7a     # S (normative release commit)
 SLT=e8dc34c15b9862ecf18ee9f4915b540837d9de37     # reproduction tooling (S identical)
-C1_SHA=2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939
-C1_BYTES=339746
 HELLO_SHA=3b1113fedd90ff0e9c8c4ca99123e35c3fe80c41e18aedf5dd66de16eda7a264   # Windows reference SemCode of hello.sm
 LIM=(--envelope trusted-compiler --max-steps 150000000 --max-calls 2000000 --max-frames 256)
 
@@ -66,6 +77,7 @@ clone() {  # clone <url> <sha> <dir>: LF checkout at an exact commit
 }
 SEM=https://github.com/skulmakov-oss/Semantic
 step clone_up   core clone "$SEM" "$UP"   "$WORK/up"
+step anchor_cargo_lock core bash -c "got=\$(python '$TOOLS' sha '$WORK/up/Cargo.lock' | tr -d '\r'); echo \"Cargo.lock sha256=\$got anchor=$LOCK_SHA\"; [ \"\$got\" = '$LOCK_SHA' ]"
 step clone_c0   core clone "$SEM" "$C0"   "$WORK/c0"
 step clone_exec core clone "$SEM" "$EXEC" "$WORK/exec"
 step clone_sl   core clone https://github.com/skulmakov-oss/Semantic-Language "$SLT" "$WORK/sl"
@@ -84,7 +96,7 @@ step test_sm_vm     core bash -c "cd '$WORK/up' && cargo test --release --locked
 step test_sm_verify core bash -c "cd '$WORK/up' && cargo test --release --locked -p sm-verify"
 step test_quad      core bash -c "cd '$WORK/up' && cargo test --release --locked -p semantic-core-quad"
 # A filter that selects no test must not count as a pass.
-step test_2089_record_snapshot core bash -c "cd '$WORK/up' && cargo test --release --locked -p sm-vm record_snapshot_read_after_call_without_destination 2>&1 | tee /dev/stderr | grep -Eq 'test result: ok\. [1-9][0-9]* passed'"
+step test_2089_record_snapshot core bash -o pipefail -c "cd '$WORK/up' && cargo test --release --locked -p sm-vm record_snapshot_read_after_call_without_destination 2>&1 | tee /dev/stderr | grep -Eq 'test result: ok\. [1-9][0-9]* passed'"
 step test_paths_lsp core bash -c "cd '$WORK/up' && cargo test --release --locked -p smc-cli --lib -- lsp:: platform_paths hub:: package_manifest:: --show-output"
 step test_hub_cli core bash -c "cd '$WORK/up' && cargo test --release --locked --test hub_cli -- --show-output"
 step test_workspace core bash -c "cd '$WORK/up' && cargo test --locked --workspace --all-targets --no-fail-fast -- --show-output"
