@@ -39,7 +39,14 @@ step() {
   echo "[$name] class=$class exit=$rc"
   return $rc
 }
-must_fail() { "$@"; local rc=$?; echo "exit=$rc (expected non-zero)"; [ "$rc" -ne 0 ]; }
+# reject <exit-code> <ERE> <command...>: a negative check passes only on the exact controlled exit code AND the
+# expected diagnostic; a crash, signal or any other code fails it (no false PASS from abnormal termination).
+reject() {
+  local want=$1 pat=$2; shift 2
+  local out rc; out=$("$@" 2>&1); rc=$?
+  printf '%s\n' "$out"; echo "exit=$rc (expected $want, diagnostic /$pat/)"
+  [ "$rc" -eq "$want" ] && printf '%s' "$out" | grep -Eq "$pat"
+}
 py() { python "$@" | tr -d '\r'; }
 
 step env core python "$TOOLS" env "$OUT/env.json" "$EXPECT_ARCH"
@@ -98,17 +105,18 @@ step smoke_run       core "$UPSMC" run "$SM/hello.sm"
 step smoke_run_smc   core "$UPSMC" run-smc "$SM/hello.smc"
 step smoke_svm_run   core "$UPSVM" run "$SM/hello.smc"
 step smoke_deterministic core bash -c "'$UPSMC' compile '$SM/hello.sm' -o '$SM/hello2.smc' && cmp '$SM/hello.smc' '$SM/hello2.smc'"
-step smoke_assert_fails  core must_fail "$UPSMC" run "$SM/fail.sm"
-step smoke_parse_fails   core must_fail "$UPSMC" compile "$SM/bad.sm" -o "$SM/bad.smc"
-step smoke_truncated_rejected core bash -c "python '$TOOLS' mutate truncate '$SM/hello.smc' '$SM/trunc.smc' && ! '$UPSMC' verify '$SM/trunc.smc'"
-step smoke_magic_rejected     core bash -c "python '$TOOLS' mutate magic '$SM/hello.smc' '$SM/magic.smc' && ! '$UPSMC' verify '$SM/magic.smc'"
+step smoke_assert_fails  core reject 1 '^assertion failed' "$UPSMC" run "$SM/fail.sm"
+step smoke_parse_fails   core reject 1 'expected primary expression' "$UPSMC" compile "$SM/bad.sm" -o "$SM/bad.smc"
+step smoke_mutants core bash -c "python '$TOOLS' mutate truncate '$SM/hello.smc' '$SM/trunc.smc' && python '$TOOLS' mutate magic '$SM/hello.smc' '$SM/magic.smc'"
+step smoke_truncated_rejected core reject 1 '^verify error \[TruncatedFunction\]' "$UPSMC" verify "$SM/trunc.smc"
+step smoke_magic_rejected     core reject 1 '^verify error \[UnsupportedVersion\]' "$UPSMC" verify "$SM/magic.smc"
 
 # Self-hosting chain on the corrected executor (fbb49594).
 A="$OUT/artifacts"
 step c1_from_c0 core ${TIMEV[@]+"${TIMEV[@]}"} "$C0SMC" compile "$WORK/sl/compiler/main.sm" -o "$A/C1.smc"
 step c1_identity core python "$TOOLS" expect "$A/C1.smc" "$C1_SHA" "$C1_BYTES"
 step c1_verify_upstream core "$UPSMC" verify "$A/C1.smc"
-step c1_wrong_hash_rejected core must_fail "$UPSMC" run-smc "$A/C1.smc" --expect-sha256 "sha256:0000000000000000000000000000000000000000000000000000000000000000" --profile cli-read-only --root "$SM" -- hello.sm
+step c1_wrong_hash_rejected core reject 1 '^artifact identity mismatch: expected sha256:0{64}, found sha256:'"$C1_SHA" "$UPSMC" run-smc "$A/C1.smc" --expect-sha256 "sha256:0000000000000000000000000000000000000000000000000000000000000000" --profile cli-read-only --root "$SM" -- hello.sm
 gen() {  # gen <executor> <in.smc> <out.smc> <tag>
   local h; h=$(py "$TOOLS" sha "$2")
   ${TIMEV[@]+"${TIMEV[@]}"} "$1" run-smc "$2" --expect-sha256 "sha256:$h" --profile cli-read-only --root "$WORK/sl/compiler" "${LIM[@]}" --metrics json -- main.sm > "$OUT/logs/$4.stdout" 2> "$OUT/logs/$4.stderr"
