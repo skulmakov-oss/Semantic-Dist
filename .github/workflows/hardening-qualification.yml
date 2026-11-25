@@ -1,0 +1,89 @@
+name: Cross-Platform Hardening Qualification (test-only)
+
+# Evidence for SEMANTIC-CROSS-PLATFORM-HARDENING-GO-05. Each job pins one exact
+# Semantic commit (ci/hardening/plan.json). Targeted jobs confirm RED on the
+# pre-fix commit and GREEN on the fix; full jobs requalify an integration
+# candidate natively (workspace tests are a core gate). No secrets, read-only.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/hardening-qualification.yml
+      - ci/hardening/**
+      - ci/nq_tools.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardening-qualification-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          persist-credentials: false
+      - id: plan
+        run: |
+          echo "matrix=$(jq -c '{include: .}' ci/hardening/plan.json)" >> "$GITHUB_OUTPUT"
+
+  qualify:
+    needs: plan
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.11"
+      - name: Install system BLAS (Linux; required by the upstream workspace, as in upstream CI)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: "1.97.1"
+      - name: Targeted RED/GREEN
+        if: matrix.mode == 'targeted'
+        env:
+          HQ_OUT: ${{ runner.temp }}/hq-out
+          HQ_WORK: ${{ runner.temp }}/hq-work
+          HQ_SHA: ${{ matrix.sha }}
+          HQ_ARCH: ${{ matrix.arch }}
+          HQ_CMDS: ${{ matrix.cmds }}
+          HQ_EXPECT: ${{ matrix.expect }}
+          HQ_PATTERN: ${{ matrix.pattern }}
+          HQ_REQUIRE: ${{ matrix.require }}
+          HQ_FORBID: ${{ matrix.forbid }}
+          CARGO_TERM_COLOR: never
+        run: bash ci/hardening/targeted.sh
+      - name: Full native requalification
+        if: matrix.mode == 'full'
+        env:
+          NQ_OUT: ${{ runner.temp }}/hq-out
+          NQ_WORK: ${{ runner.temp }}/hq-work
+          NQ_EXPECT_ARCH: ${{ matrix.arch }}
+          HQ_SHA: ${{ matrix.sha }}
+          CARGO_TERM_COLOR: never
+        run: bash ci/hardening/full.sh
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: hq-${{ matrix.id }}
+          path: ${{ runner.temp }}/hq-out
+          if-no-files-found: error
