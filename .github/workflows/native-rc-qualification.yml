@@ -1,0 +1,77 @@
+name: Native Release-Candidate Qualification
+
+# Downstream integrator qualification of the pinned upstream on the four
+# native targets: build, targeted and full workspace tests, the self-hosting
+# chain C0(S)=C1, C1(S)=C2, C2(S)=C3 on the pinned runtime, and the
+# Semantic-Language reproduction-mode workflow on the frozen tools.
+# Runs when the upstream pin or this qualification changes, and on manual
+# dispatch; not on documentation changes. Read-only, no secrets.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - upstream_anchor.json
+      - manifests/selfhost_pin.json
+      - .github/workflows/native-rc-qualification.yml
+      - ci/native/**
+      - ci/nq_tools.py
+  push:
+    branches: [main]
+    paths:
+      - upstream_anchor.json
+      - manifests/selfhost_pin.json
+      - .github/workflows/native-rc-qualification.yml
+      - ci/native/**
+      - ci/nq_tools.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-rc-qualification-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native:
+    name: native (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: macos-arm64, runner: macos-15, arch: arm64 }
+          - { label: ubuntu-x86_64, runner: ubuntu-24.04, arch: x86_64 }
+          - { label: ubuntu-arm64, runner: ubuntu-24.04-arm, arch: arm64 }
+          - { label: windows-x86_64, runner: windows-2025, arch: x86_64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.11"
+      - name: Install system BLAS (Linux; required by the upstream workspace)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: "1.97.1"
+      - name: Native qualification
+        env:
+          NQ_OUT: ${{ runner.temp }}/nq-out
+          NQ_WORK: ${{ runner.temp }}/nq-work
+          NQ_EXPECT_ARCH: ${{ matrix.arch }}
+          CARGO_TERM_COLOR: never
+        run: bash ci/native/qualify.sh
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: native-rc-${{ matrix.label }}
+          path: ${{ runner.temp }}/nq-out
+          if-no-files-found: error
