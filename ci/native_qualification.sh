@@ -74,6 +74,18 @@ step test_quad      core bash -c "cd '$WORK/up' && cargo test --release --locked
 step test_2089_main core bash -c "cd '$WORK/main' && cargo test --release --locked -p sm-vm record_snapshot_read_after_call_without_destination"
 step test_workspace info bash -c "cd '$WORK/up' && cargo test --locked --workspace --all-targets --no-fail-fast"
 
+# macOS diagnosis (info): /var and /tmp are system symlinks to /private/*; upstream path admission rejects
+# symlinked path components. Re-run the workspace with TMPDIR on a symlink-free directory, and show the user-visible
+# effect of compiling a file under the system temp locations.
+if [ "$(uname -s)" = Darwin ]; then
+  mkdir -p "$WORK/tmp-real"
+  step test_workspace_real_tmpdir info bash -c "cd '$WORK/up' && TMPDIR='$WORK/tmp-real' cargo test --locked --workspace --all-targets --no-fail-fast"
+  step macos_tmp_is_symlink info bash -c "ls -ld /tmp /var; echo TMPDIR=\$TMPDIR; python -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' \"\$TMPDIR\""
+  step smoke_run_under_private_tmp info bash -c "d=/private/tmp/nq_hello_real; mkdir -p \$d && printf 'fn main() { return; }\\n' > \$d/hello.sm && '$WORK/up/target/release/smc' run \$d/hello.sm"
+  step smoke_run_under_tmp_symlink info bash -c "d=/tmp/nq_hello_sym; mkdir -p \$d && printf 'fn main() { return; }\\n' > \$d/hello.sm && '$WORK/up/target/release/smc' run \$d/hello.sm"
+  step smoke_run_under_TMPDIR info bash -c "d=\$(mktemp -d) && printf 'fn main() { return; }\\n' > \$d/hello.sm && echo \$d && '$WORK/up/target/release/smc' run \$d/hello.sm"
+fi
+
 # CLI smoke with the native corrected toolchain.
 SM="$WORK/smoke"; mkdir -p "$SM"
 printf 'fn main() { let x: i32 = 40; assert(x + 2 == 42); return; }\n' > "$SM/hello.sm"
