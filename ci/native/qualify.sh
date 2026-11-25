@@ -56,6 +56,8 @@ step() {
   echo "[$name] class=$class exit=$rc"
   return $rc
 }
+# Identity gates stop the run: nothing is built or tested from unverified sources.
+abort() { echo "IDENTITY GATE FAILED: $1"; python "$TOOLS" summary "$OUT" || true; exit 1; }
 # reject <exit-code> <ERE> <command...>: a negative check passes only on the exact controlled exit code AND the
 # expected diagnostic; a crash, signal or any other code fails it (no false PASS from abnormal termination).
 reject() {
@@ -76,12 +78,12 @@ clone() {  # clone <url> <sha> <dir>: LF checkout at an exact commit
   echo "$3 head=$(git -C "$3" rev-parse HEAD) tree=$(git -C "$3" rev-parse 'HEAD^{tree}')"
 }
 SEM=https://github.com/skulmakov-oss/Semantic
-step clone_up   core clone "$SEM" "$UP"   "$WORK/up"
-step anchor_cargo_lock core bash -c "got=\$(python '$TOOLS' sha '$WORK/up/Cargo.lock' | tr -d '\r'); echo \"Cargo.lock sha256=\$got anchor=$LOCK_SHA\"; [ \"\$got\" = '$LOCK_SHA' ]"
-step clone_c0   core clone "$SEM" "$C0"   "$WORK/c0"
-step clone_exec core clone "$SEM" "$EXEC" "$WORK/exec"
-step clone_sl   core clone https://github.com/skulmakov-oss/Semantic-Language "$SLT" "$WORK/sl"
-step s_identical_to_release core git -C "$WORK/sl" diff --quiet "$SLS" HEAD -- compiler bootstrap/source-set.toml
+step clone_up   core clone "$SEM" "$UP"   "$WORK/up" || abort "clone_up"
+step anchor_cargo_lock core bash -c "got=\$(python '$TOOLS' sha '$WORK/up/Cargo.lock' | tr -d '\r'); echo \"Cargo.lock sha256=\$got anchor=$LOCK_SHA\"; [ \"\$got\" = '$LOCK_SHA' ]" || abort anchor_cargo_lock
+step clone_c0   core clone "$SEM" "$C0"   "$WORK/c0" || abort "clone_c0"
+step clone_exec core clone "$SEM" "$EXEC" "$WORK/exec" || abort "clone_exec"
+step clone_sl   core clone https://github.com/skulmakov-oss/Semantic-Language "$SLT" "$WORK/sl" || abort "clone_sl"
+step s_identical_to_release core git -C "$WORK/sl" diff --quiet "$SLS" HEAD -- compiler bootstrap/source-set.toml || abort "s_identical_to_release"
 
 build() { local d=$1; shift; (cd "$d" && rustc -vV && cargo -V && cargo build --release --locked "$@"); }
 step build_up   core build "$WORK/up"   --bin smc --bin svm
@@ -96,7 +98,7 @@ step test_sm_vm     core bash -c "cd '$WORK/up' && cargo test --release --locked
 step test_sm_verify core bash -c "cd '$WORK/up' && cargo test --release --locked -p sm-verify"
 step test_quad      core bash -c "cd '$WORK/up' && cargo test --release --locked -p semantic-core-quad"
 # A filter that selects no test must not count as a pass.
-step test_2089_record_snapshot core bash -o pipefail -c "cd '$WORK/up' && cargo test --release --locked -p sm-vm record_snapshot_read_after_call_without_destination 2>&1 | tee /dev/stderr | grep -Eq 'test result: ok\. [1-9][0-9]* passed'"
+step test_2089_record_snapshot core bash -c "cd '$WORK/up' && cargo test --release --locked -p sm-vm record_snapshot_read_after_call_without_destination > '$OUT/logs/test_2089.cargo.log' 2>&1; rc=\$?; cat '$OUT/logs/test_2089.cargo.log'; [ \$rc -eq 0 ] && grep -Eq 'test result: ok\. [1-9][0-9]* passed' '$OUT/logs/test_2089.cargo.log'"
 step test_paths_lsp core bash -c "cd '$WORK/up' && cargo test --release --locked -p smc-cli --lib -- lsp:: platform_paths hub:: package_manifest:: --show-output"
 step test_hub_cli core bash -c "cd '$WORK/up' && cargo test --release --locked --test hub_cli -- --show-output"
 step test_workspace core bash -c "cd '$WORK/up' && cargo test --locked --workspace --all-targets --no-fail-fast -- --show-output"
