@@ -2,8 +2,8 @@
 
 Repository: `skulmakov-oss/Semantic-Dist`  
 Authoritative Compiler Repository: `skulmakov-oss/Semantic`  
-Upstream Pinned SHA: `fbb49594cc3554b90b0977f9b6a69fc584e11e79`  
-Release Target: `v1.3.0-rc.1` (candidate; previous preview `v1.3.0-beta.1`)
+Upstream Pinned SHA: `07b3dee3a6ef244f7846371d460521833c907efa` (exact rc.2 candidate; to be replaced by the integrated main commit before merge)  
+Release Target: `v1.3.0-rc.2` (candidate; `v1.3.0-rc.1` at `fbb49594` unpublished; previous preview `v1.3.0-beta.1`)
 
 ---
 
@@ -23,7 +23,7 @@ The Windows x64 installer (`Semantic-Setup-x64.exe`) provides a complete, self-c
 - **Optional PATH integration**: Adds `Semantic\bin` to the user's `PATH`.
 
 ### What this installer contains — and what it does not
-- **It contains:** the Rust toolchain (`smc`, `svm`) built from the pinned upstream commit `fbb49594`, plus the `sm-launch` launcher. That commit includes the VM liveness fix ([skulmakov-oss/Semantic#2087](https://github.com/skulmakov-oss/Semantic/pull/2087)).
+- **It contains:** the Rust toolchain (`smc`, `svm`) built from the pinned upstream commit (see Upstream Pinned SHA), plus the `sm-launch` launcher. That commit includes the VM liveness fix ([skulmakov-oss/Semantic#2087](https://github.com/skulmakov-oss/Semantic/pull/2087)).
 - **It does not contain:** the **self-hosted compiler** (C1). The installed `smc` stays the default Rust compiler; this package does not replace it.
 - **Self-hosted compiler:** written in Semantic and developed and qualified in [Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language). Its Bootstrap Seal is validated, not reproduced or accepted.
 
@@ -55,7 +55,7 @@ The pinned identities are in [`manifests/selfhost_pin.json`](manifests/selfhost_
 ### Known issue in the earlier preview
 `v1.3.0-beta.1` (pinned `1d1e76c7`) contains the VM liveness regression `aff35531`.
 - **Effect:** a verified program can stop with `read uninitialized reg rN` after a call whose result is discarded. It fails closed.
-- **Fix:** this candidate's pin `fbb49594` includes the fix. `v1.3.0-beta.1` is unchanged.
+- **Fix:** this candidate's pin includes the fix. `v1.3.0-beta.1` is unchanged.
 
 ### Running Semantic Programs
 From PowerShell or CMD:
