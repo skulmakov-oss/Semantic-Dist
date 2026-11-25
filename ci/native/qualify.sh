@@ -102,6 +102,7 @@ step test_2089_record_snapshot core bash -c "cd '$WORK/up' && cargo test --relea
 step test_paths_lsp core bash -c "cd '$WORK/up' && cargo test --release --locked -p smc-cli --lib -- lsp:: platform_paths hub:: package_manifest:: --show-output"
 step test_hub_cli core bash -c "cd '$WORK/up' && cargo test --release --locked --test hub_cli -- --show-output"
 step test_workspace core bash -c "cd '$WORK/up' && cargo test --locked --workspace --all-targets --no-fail-fast -- --show-output"
+step test_doctests core bash -c "cd '$WORK/up' && cargo test --locked --workspace --doc"
 python "$TOOLS" tests "$OUT/logs/test_workspace.log" "$OUT/workspace_tests.json"
 
 # CLI smoke with the native corrected toolchain.
