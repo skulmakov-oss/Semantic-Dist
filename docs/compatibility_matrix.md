@@ -1,7 +1,7 @@
 # Compatibility & Platform Support Matrix — Semantic-Dist
 
 Status: Normative Platform Baseline  
-Target Release: `v1.3.0-beta.1`
+Target Release: `v1.3.0-rc.1` (candidate)
 
 ---
 

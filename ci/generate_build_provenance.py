@@ -46,7 +46,7 @@ def main():
 
     provenance = {
         "product_name": "Semantic",
-        "product_version": "1.3.0-beta.1",
+        "product_version": "1.3.0-rc.1",
         "release_channel": "developer-preview",
         "classification": "Unsigned Developer Preview — Not a Published Release",
         "generated_at": datetime.now(timezone.utc).isoformat(),

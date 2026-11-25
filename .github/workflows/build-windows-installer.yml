@@ -43,7 +43,7 @@ jobs:
         run: |
           git clone --no-checkout https://github.com/skulmakov-oss/Semantic.git upstream
           cd upstream
-          git checkout 1d1e76c7509a03baa0133abaaa5819f5d32582b2
+          git checkout fbb49594cc3554b90b0977f9b6a69fc584e11e79
           cargo build --locked --release --bin smc --bin svm
 
       - name: Stage Artifacts
@@ -221,6 +221,72 @@ jobs:
             if (Test-Path $caseBDir) { Remove-Item -Recurse -Force $caseBDir -ErrorAction SilentlyContinue }
           }
 
+      - name: Reproduce Self-Hosted Compiler C1 From Source (optional workflow)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PIN=manifests/selfhost_pin.json
+          C0_SHA=$(python -c "import json;print(json.load(open('$PIN'))['c0_reference']['commit'])" | tr -d '\r')
+          SL_SHA=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['commit'])" | tr -d '\r')
+          C1_SHA=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['c1_sha256'])" | tr -d '\r')
+          C1_BYTES=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['c1_bytes'])" | tr -d '\r')
+          git -c core.autocrlf=false -c core.eol=lf clone --no-checkout https://github.com/skulmakov-oss/Semantic.git c0
+          git -C c0 -c core.autocrlf=false -c core.eol=lf checkout "$C0_SHA"
+          (cd c0 && cargo build --locked --release --bin smc)
+          git -c core.autocrlf=false -c core.eol=lf clone --no-checkout https://github.com/skulmakov-oss/Semantic-Language.git sl
+          git -C sl -c core.autocrlf=false -c core.eol=lf checkout "$SL_SHA"
+          c0/target/release/smc.exe compile sl/compiler/main.sm -o selfhost-C1.smc
+          GOT=$(sha256sum selfhost-C1.smc | cut -d' ' -f1); SIZE=$(stat -c %s selfhost-C1.smc)
+          echo "C1 sha256=$GOT bytes=$SIZE"
+          test "$GOT" = "$C1_SHA" && test "$SIZE" = "$C1_BYTES"
+
+      - name: Self-Hosted Compiler Smoke On Installed smc (fresh install, uninstall)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pin = Get-Content manifests/selfhost_pin.json -Raw | ConvertFrom-Json
+          $c1Sha = $pin.self_hosted_compiler.c1_sha256
+          $dir = Join-Path $env:TEMP "semantic-selfhost-ci"
+          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+          $p = Start-Process -FilePath "packaging/windows/dist/Semantic-Setup-x64.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`"", "/TASKS=`"`"" -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "install failed: $($p.ExitCode)" }
+          $smc = Join-Path $dir "bin\smc.exe"
+          & $smc version
+          $c1 = (Resolve-Path selfhost-C1.smc).Path
+          & $smc verify $c1; if ($LASTEXITCODE -ne 0) { throw "installed verifier rejected C1" }
+          Write-Host "1. Wrong --expect-sha256 must be rejected"
+          & $smc run-smc $c1 --expect-sha256 ("sha256:" + ("0" * 64)) --profile cli-read-only --root sl/compiler -- main.sm
+          if ($LASTEXITCODE -eq 0) { throw "run-smc accepted a wrong artifact hash" }
+          Write-Host "2. C1 compiles a program; bytes must equal C0 output; verify and run"
+          $w = Join-Path $env:TEMP "semantic-selfhost-prog"; New-Item -ItemType Directory -Force -Path $w | Out-Null
+          [System.IO.File]::WriteAllText((Join-Path $w "prog.sm"), "fn main() { let x: i32 = 40; assert(x + 2 == 42); return; }")
+          $out = & $smc run-smc $c1 --expect-sha256 ("sha256:" + $c1Sha) --profile cli-read-only --root $w --envelope trusted-compiler --max-steps 150000000 --max-calls 2000000 --max-frames 256 -- prog.sm
+          if ($LASTEXITCODE -ne 0) { throw "C1 failed to compile the program" }
+          $hex = ($out | Where-Object { $_ -like "hex *" } | Select-Object -First 1).Substring(4).Trim()
+          $bytes = [byte[]]::new($hex.Length / 2); for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($hex.Substring(2 * $i, 2), 16) }
+          [System.IO.File]::WriteAllBytes((Join-Path $w "by_C1.smc"), $bytes)
+          & c0/target/release/smc.exe compile (Join-Path $w "prog.sm") -o (Join-Path $w "by_C0.smc"); if ($LASTEXITCODE -ne 0) { throw "C0 compile failed" }
+          if ((Get-FileHash (Join-Path $w "by_C1.smc")).Hash -ne (Get-FileHash (Join-Path $w "by_C0.smc")).Hash) { throw "C1 output differs from C0" }
+          & $smc verify (Join-Path $w "by_C1.smc"); if ($LASTEXITCODE -ne 0) { throw "verify failed" }
+          & $smc run-smc (Join-Path $w "by_C1.smc"); if ($LASTEXITCODE -ne 0) { throw "run failed" }
+          Write-Host "3. Fixed point on the installed runtime: C1 compiles S to C1"
+          $s = & $smc run-smc $c1 --expect-sha256 ("sha256:" + $c1Sha) --profile cli-read-only --root sl/compiler --envelope trusted-compiler --max-steps 150000000 --max-calls 2000000 --max-frames 256 --metrics json -- main.sm
+          if ($LASTEXITCODE -ne 0) { throw "C1 failed to compile S" }
+          $h2 = ($s | Where-Object { $_ -like "hex *" } | Select-Object -First 1)
+          $h2 = ($h2.Substring(4) -replace '[^0-9a-f].*$','')
+          $b2 = [byte[]]::new($h2.Length / 2); for ($i = 0; $i -lt $b2.Length; $i++) { $b2[$i] = [Convert]::ToByte($h2.Substring(2 * $i, 2), 16) }
+          [System.IO.File]::WriteAllBytes((Join-Path $w "C2.smc"), $b2)
+          $c2Sha = (Get-FileHash (Join-Path $w "C2.smc")).Hash.ToLower()
+          Write-Host "C2 sha256=$c2Sha bytes=$($b2.Length)"
+          $s | Where-Object { $_ -like "*semantic.run.metrics*" } | Write-Host
+          if ($c2Sha -ne $c1Sha) { throw "fixed point failed on the installed runtime" }
+          Write-Host "4. Uninstall and clean-state check"
+          $u = Get-ChildItem -Path $dir -Filter "unins*.exe" | Select-Object -First 1
+          $up = Start-Process -FilePath $u.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru -NoNewWindow
+          if ($up.ExitCode -ne 0) { throw "uninstall failed" }
+          Start-Sleep -Seconds 2
+          if (Test-Path (Join-Path $dir "bin")) { throw "bin directory left behind" }
+
       - name: Upload Unsigned Installer and Provenance Manifest
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
@@ -228,4 +294,5 @@ jobs:
           path: |
             packaging/windows/dist/Semantic-Setup-x64.exe
             build_provenance.json
+            selfhost-C1.smc
           if-no-files-found: error

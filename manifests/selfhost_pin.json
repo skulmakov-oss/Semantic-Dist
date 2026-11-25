@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0.0",
+  "purpose": "Optional self-hosted compiler workflow. The installer does not contain C1; the installed Rust smc stays the default compiler.",
+  "self_hosted_compiler": {
+    "repository_url": "https://github.com/skulmakov-oss/Semantic-Language",
+    "commit": "5b404e5fbf487f05106617576eddefdb1cea1a7a",
+    "source_set_identity": "sha256:c9e0cb333ac13fd76989a8db67928d8802e220284f8b5e4ca3b942235ac6148f",
+    "entry": "compiler/main.sm",
+    "c1_sha256": "2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939",
+    "c1_bytes": 339746,
+    "c1_definition": "C1 = C0(S): smc compile compiler/main.sm, with smc built from the C0 commit below"
+  },
+  "c0_reference": {
+    "repository_url": "https://github.com/skulmakov-oss/Semantic",
+    "commit": "1d1e76c7509a03baa0133abaaa5819f5d32582b2",
+    "role": "historical reference compiler of Bootstrap Contract v4 (frozen); used here only to reproduce C1 from source"
+  },
+  "runtime": {
+    "role": "the installed smc (upstream_anchor.json pinned commit) runs C1 with run-smc --expect-sha256 under the trusted-compiler envelope",
+    "envelope": {
+      "max_steps": 150000000,
+      "max_calls": 2000000,
+      "max_frames": 256
+    },
+    "note": "the Bootstrap Contract v4 normative executor is skulmakov-oss/Semantic@825deca4 (frozen, separate); the distribution runtime is the corrected pinned upstream"
+  },
+  "platform": "x86_64-pc-windows-msvc",
+  "seal_status": "validated (not independently reproduced or accepted); the Dist CI host is a distinct host but not a distinct operator"
+}

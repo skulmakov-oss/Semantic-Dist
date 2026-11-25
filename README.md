@@ -2,8 +2,8 @@
 
 Repository: `skulmakov-oss/Semantic-Dist`  
 Authoritative Compiler Repository: `skulmakov-oss/Semantic`  
-Upstream Pinned SHA: `1d1e76c7509a03baa0133abaaa5819f5d32582b2`  
-Release Target: `v1.3.0-beta.1`
+Upstream Pinned SHA: `fbb49594cc3554b90b0977f9b6a69fc584e11e79`  
+Release Target: `v1.3.0-rc.1` (candidate; previous preview `v1.3.0-beta.1`)
 
 ---
 
@@ -23,15 +23,39 @@ The Windows x64 installer (`Semantic-Setup-x64.exe`) provides a complete, self-c
 - **Optional PATH integration**: Adds `Semantic\bin` to the user's `PATH`.
 
 ### What this installer contains — and what it does not
-- **It contains:** the Rust toolchain built from the pinned upstream commit `1d1e76c7` (`smc`, `svm`) and the `sm-launch` launcher.
-- **It does not contain:** the **self-hosted compiler**. That compiler is written in Semantic and reached a byte-identical `C1 = C2 = C3` fixed point on 2026-11-25. It is developed and qualified in [Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language), and its Bootstrap Seal is validated, not reproduced or accepted.
-- **Default compiler:** the installed `smc` remains the Rust reference compiler. Nothing in this package replaces it.
+- **It contains:** the Rust toolchain (`smc`, `svm`) built from the pinned upstream commit `fbb49594`, plus the `sm-launch` launcher. That commit includes the VM liveness fix ([skulmakov-oss/Semantic#2087](https://github.com/skulmakov-oss/Semantic/pull/2087)).
+- **It does not contain:** the **self-hosted compiler** (C1). The installed `smc` stays the default Rust compiler; this package does not replace it.
+- **Self-hosted compiler:** written in Semantic and developed and qualified in [Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language). Its Bootstrap Seal is validated, not reproduced or accepted.
 
-### Known issue (upstream)
-A VM liveness regression in `skulmakov-oss/Semantic` (`aff35531`, included in the pinned `1d1e76c7`) affects this preview:
-- **Effect:** a program admitted by `smc verify` can stop at run time with `read uninitialized reg rN` after a call to a function whose result is discarded. It fails closed; no wrong value was observed.
-- **Not affected:** v1.2.0.
-- **Fix:** [skulmakov-oss/Semantic#2087](https://github.com/skulmakov-oss/Semantic/pull/2087). A packaging update needs a new upstream pin under this repository's release policy.
+### Optional: run the self-hosted compiler (C1)
+The pinned identities are in [`manifests/selfhost_pin.json`](manifests/selfhost_pin.json): C1 SHA-256 `2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939`, 339,746 bytes.
+
+1. Get C1 in either of two ways:
+   - download it from the Semantic-Language release, once one is published;
+   - reproduce it from source: build `smc` at the C0 commit and run `smc compile compiler/main.sm -o C1.smc` in a Semantic-Language checkout at the pinned commit.
+2. Run it with the installed `smc`. `--expect-sha256` binds the exact bytes, and the verifier admits C1 before it runs:
+   ```powershell
+   smc run-smc C1.smc --expect-sha256 sha256:2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 `
+     --profile cli-read-only --root <folder with prog.sm> --envelope trusted-compiler `
+     --max-steps 150000000 --max-calls 2000000 --max-frames 256 -- prog.sm
+   ```
+3. Read the result: the compiler prints the program's SemCode as a `hex` line, and `smc verify` admits it.
+
+**Supported subset:** the Bootstrap Subset of Semantic-Language, not the full language. Platform: Windows x64 only.
+
+**CI:** the build workflow reproduces C1 from source on a fresh hosted Windows runner, then:
+- installs the package;
+- checks that a wrong hash is rejected;
+- compiles a program and compares the bytes with C0;
+- verifies that C1 compiles its own source back to C1;
+- uninstalls.
+
+**Relation to the contract executor:** the Bootstrap Contract v4 normative executor is `skulmakov-oss/Semantic@825deca4`. It stays frozen and separate; this distribution runtime is the corrected upstream pin.
+
+### Known issue in the earlier preview
+`v1.3.0-beta.1` (pinned `1d1e76c7`) contains the VM liveness regression `aff35531`.
+- **Effect:** a verified program can stop with `read uninitialized reg rN` after a call whose result is discarded. It fails closed.
+- **Fix:** this candidate's pin `fbb49594` includes the fix. `v1.3.0-beta.1` is unchanged.
 
 ### Running Semantic Programs
 From PowerShell or CMD:
