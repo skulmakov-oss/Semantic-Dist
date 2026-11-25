@@ -72,7 +72,7 @@ step test_sm_vm     core bash -c "cd '$WORK/up' && cargo test --release --locked
 step test_sm_verify core bash -c "cd '$WORK/up' && cargo test --release --locked -p sm-verify"
 step test_quad      core bash -c "cd '$WORK/up' && cargo test --release --locked -p semantic-core-quad"
 step test_2089_main core bash -c "cd '$WORK/main' && cargo test --release --locked -p sm-vm record_snapshot_read_after_call_without_destination"
-step test_workspace info bash -c "cd '$WORK/up' && cargo test --locked --workspace --all-targets"
+step test_workspace info bash -c "cd '$WORK/up' && cargo test --locked --workspace --all-targets --no-fail-fast"
 
 # CLI smoke with the native corrected toolchain.
 SM="$WORK/smoke"; mkdir -p "$SM"
