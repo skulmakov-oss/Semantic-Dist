@@ -226,10 +226,10 @@ jobs:
         run: |
           set -euo pipefail
           PIN=manifests/selfhost_pin.json
-          C0_SHA=$(python -c "import json;print(json.load(open('$PIN'))['c0_reference']['commit'])")
-          SL_SHA=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['commit'])")
-          C1_SHA=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['c1_sha256'])")
-          C1_BYTES=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['c1_bytes'])")
+          C0_SHA=$(python -c "import json;print(json.load(open('$PIN'))['c0_reference']['commit'])" | tr -d '\r')
+          SL_SHA=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['commit'])" | tr -d '\r')
+          C1_SHA=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['c1_sha256'])" | tr -d '\r')
+          C1_BYTES=$(python -c "import json;print(json.load(open('$PIN'))['self_hosted_compiler']['c1_bytes'])" | tr -d '\r')
           git -c core.autocrlf=false -c core.eol=lf clone --no-checkout https://github.com/skulmakov-oss/Semantic.git c0
           git -C c0 -c core.autocrlf=false -c core.eol=lf checkout "$C0_SHA"
           (cd c0 && cargo build --locked --release --bin smc)
