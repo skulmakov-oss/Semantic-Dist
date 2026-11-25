@@ -1,17 +1,23 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-11-25T05:30:00Z",
+  "generated_at": "2026-11-26T00:00:00Z",
   "canonical_upstream": {
     "repository_url": "https://github.com/skulmakov-oss/Semantic",
-    "pinned_commit_sha": "fbb49594cc3554b90b0977f9b6a69fc584e11e79",
-    "upstream_reference_label": "main@fbb49594",
+    "pinned_commit_sha": "07b3dee3a6ef244f7846371d460521833c907efa",
+    "upstream_reference_label": "candidate/rc2-all-c1@07b3dee3 (exact candidate; re-pin to the integrated main commit before merge)",
     "verified_features": [
       "S2044-text-literal-boundary-E0005",
       "S2043-bundle-module-display-path",
       "quad-logic-frame-v1",
       "package-baseline-v0",
       "vm-liveness-call-without-destination-fix-2087",
-      "run-smc-stored-semcode-expect-sha256-2086"
+      "run-smc-stored-semcode-expect-sha256-2086",
+      "hub-out-containment-deepest-existing-ancestor-2090",
+      "macos-os-owned-path-aliases-2092",
+      "lsp-windows-8dot3-uri-2091",
+      "apfs-non-utf8-test-portability-2093",
+      "hub-turbovec-macos-os-owned-aliases-2095",
+      "winit-macos-main-thread-contract-2096"
     ],
     "cargo_lock_blob_sha256": "c59fd12dd27a54d7dac5cf4fa83470f876f09b5eb1d82a4fa5059c06a25688a8",
     "cargo_lock_blob_git_oid": "732c4b81abe87d0024551c9f6680b59ee2e750ec",
@@ -26,7 +32,7 @@
   },
   "distribution_target": {
     "product_name": "Semantic",
-    "proposed_version": "1.3.0-rc.1",
+    "proposed_version": "1.3.0-rc.2",
     "release_channel": "prerelease",
     "semcode_policy": {
       "emission_default_header": "SEMCOD22",
