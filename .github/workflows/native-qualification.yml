@@ -1,0 +1,71 @@
+name: Native Runtime and Self-Host Qualification (test-only)
+
+# Engineering cross-platform evidence for SEMANTIC-NATIVE-QUALIFICATION-GO-04.
+# Builds pinned upstream revisions natively; no packaging, no publication, no secrets.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/native-qualification.yml
+      - ci/native_qualification.sh
+      - ci/nq_tools.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-qualification-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    name: native (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.optional }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: macos-arm64, runner: macos-15, expect_arch: arm64, optional: false }
+          - { label: ubuntu-x86_64, runner: ubuntu-24.04, expect_arch: x86_64, optional: false }
+          - { label: windows-x86_64-baseline, runner: windows-2025, expect_arch: x86_64, optional: false }
+          - { label: ubuntu-arm64-optional, runner: ubuntu-24.04-arm, expect_arch: arm64, optional: true }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout distribution repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install system BLAS (Linux; required by the upstream workspace, as in upstream CI)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+
+      - name: Install Rust Toolchain 1.97.1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: "1.97.1"
+
+      - name: Native qualification
+        env:
+          NQ_OUT: ${{ runner.temp }}/nq-out
+          NQ_WORK: ${{ runner.temp }}/nq-work
+          NQ_EXPECT_ARCH: ${{ matrix.expect_arch }}
+          CARGO_TERM_COLOR: never
+        run: bash ci/native_qualification.sh
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: native-qualification-${{ matrix.label }}
+          path: ${{ runner.temp }}/nq-out
+          if-no-files-found: error
