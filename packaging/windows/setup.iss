@@ -2,7 +2,7 @@
 ; Produces Semantic-Setup-x64.exe
 
 #define MyAppName "Semantic"
-#define MyAppVersion "1.3.0-rc.1"
+#define MyAppVersion "1.3.0-rc.2"
 #define MyAppPublisher "skulmakov-oss"
 #define MyAppURL "https://github.com/skulmakov-oss/Semantic"
 #define MyAppExeName "sm-launch.exe"
