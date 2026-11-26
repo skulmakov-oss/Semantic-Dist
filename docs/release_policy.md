@@ -12,7 +12,7 @@ Applies to: `skulmakov-oss/Semantic-Dist`
 | Axis | Version / Identifier | Description |
 |---|---|---|
 | **Product Release** | `v1.3.0-rc.2` (candidate; previous candidate `v1.3.0-rc.1` at `fbb49594`, unpublished; previous preview `v1.3.0-beta.1`) | The external release tag and user-facing package version. |
-| **Upstream Pinned SHA** | `07b3dee3a6ef244f7846371d460521833c907efa` (exact candidate; to be replaced by the integrated main commit) | The exact, immutable upstream commit of `skulmakov-oss/Semantic`. |
+| **Upstream Pinned SHA** | `98f9db199b28d6b126873f8f445aaff49b83d674` (integrated upstream main for rc.2) | The exact, immutable upstream commit of `skulmakov-oss/Semantic`. |
 | **Packaging Revision** | `dist.1` | Internal packaging iteration for installers sharing the same compiler SHA. |
 | **SemCode Header** | `SEMCOD22` (rev 23) | Baseline bytecode format admitted by `sm-verify`. |
 

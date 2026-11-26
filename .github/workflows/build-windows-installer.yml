@@ -43,7 +43,7 @@ jobs:
         run: |
           git clone --no-checkout https://github.com/skulmakov-oss/Semantic.git upstream
           cd upstream
-          git checkout 07b3dee3a6ef244f7846371d460521833c907efa
+          git checkout 98f9db199b28d6b126873f8f445aaff49b83d674
           cargo build --locked --release --bin smc --bin svm
 
       - name: Stage Artifacts

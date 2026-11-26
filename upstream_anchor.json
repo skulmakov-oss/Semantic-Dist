@@ -1,10 +1,10 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-11-26T00:00:00Z",
+  "generated_at": "2026-11-26T03:30:00Z",
   "canonical_upstream": {
     "repository_url": "https://github.com/skulmakov-oss/Semantic",
-    "pinned_commit_sha": "07b3dee3a6ef244f7846371d460521833c907efa",
-    "upstream_reference_label": "candidate/rc2-all-c1@07b3dee3 (exact candidate; re-pin to the integrated main commit before merge)",
+    "pinned_commit_sha": "98f9db199b28d6b126873f8f445aaff49b83d674",
+    "upstream_reference_label": "main@98f9db19 (integrated upstream main for rc.2)",
     "verified_features": [
       "S2044-text-literal-boundary-E0005",
       "S2043-bundle-module-display-path",
