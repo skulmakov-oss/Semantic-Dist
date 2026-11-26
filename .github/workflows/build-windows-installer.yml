@@ -12,6 +12,13 @@ jobs:
   build-installer:
     name: Build Windows x64 Installer
     runs-on: windows-latest
+    env:
+      # Qualified identity of the pinned upstream. smc built from an LF checkout
+      # of EXPECTED_UPSTREAM_SHA reports exactly EXPECTED_SMC_FINGERPRINT (Dist
+      # strict four-target qualification of this pin). Changing the pin in
+      # upstream_anchor.json without updating both values fails the build.
+      EXPECTED_UPSTREAM_SHA: 98f9db199b28d6b126873f8f445aaff49b83d674
+      EXPECTED_SMC_FINGERPRINT: 4dfa17a48b77e39f
     steps:
       - name: Checkout distribution repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -41,10 +48,108 @@ jobs:
 
       - name: Clone and Verify Pinned Upstream Semantic
         run: |
-          git clone --no-checkout https://github.com/skulmakov-oss/Semantic.git upstream
+          git -c core.autocrlf=false -c core.eol=lf clone --no-checkout https://github.com/skulmakov-oss/Semantic.git upstream
           cd upstream
+          git config core.autocrlf false
+          git config core.eol lf
           git checkout 98f9db199b28d6b126873f8f445aaff49b83d674
           cargo build --locked --release --bin smc --bin svm
+
+      - name: Verify LF Source Identity Of Pinned Upstream
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $anchorPin = (Get-Content upstream_anchor.json -Raw | ConvertFrom-Json).canonical_upstream.pinned_commit_sha
+          if ($anchorPin -cne $env:EXPECTED_UPSTREAM_SHA) {
+            throw "anchor pin '$anchorPin' != EXPECTED_UPSTREAM_SHA '$($env:EXPECTED_UPSTREAM_SHA)': update the expected fingerprint together with the pin"
+          }
+          $head = git -C upstream rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw "git rev-parse failed: $LASTEXITCODE" }
+          if ($head -cne $env:EXPECTED_UPSTREAM_SHA) { throw "upstream HEAD '$head' != '$($env:EXPECTED_UPSTREAM_SHA)'" }
+          foreach ($key in @("core.autocrlf", "core.eol")) {
+            $v = git -C upstream config --local $key
+            if ($LASTEXITCODE -ne 0) { throw "upstream $key is not set locally" }
+            Write-Host "upstream $key=$v"
+          }
+          if ((git -C upstream config --local core.autocrlf) -cne "false") { throw "upstream core.autocrlf is not false" }
+          if ((git -C upstream config --local core.eol) -cne "lf") { throw "upstream core.eol is not lf" }
+          $eol = @(git -C upstream ls-files --eol)
+          if ($LASTEXITCODE -ne 0 -or $eol.Count -eq 0) { throw "git ls-files --eol failed" }
+          $crlf = @($eol | Where-Object { $_ -match '\bw/(crlf|mixed)\b' })
+          if ($crlf.Count -ne 0) { throw "upstream working tree has $($crlf.Count) CRLF/mixed files, e.g. $($crlf[0])" }
+          $dirty = @(git -C upstream status --porcelain)
+          if ($LASTEXITCODE -ne 0) { throw "git status failed" }
+          if ($dirty.Count -ne 0) { throw "upstream working tree is not clean: $($dirty[0])" }
+          Write-Host "upstream ${head}: $($eol.Count) files, LF working tree, clean"
+
+      - name: Install And Self-Test Source Fingerprint Gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $gate = Join-Path $env:RUNNER_TEMP "fingerprint_gate.ps1"
+          Set-Content -LiteralPath $gate -Encoding utf8 -Value @'
+          function Assert-SmcFingerprint {
+              param([string[]] $Lines, [int] $ExitCode, [string] $Expected, [string] $Label)
+              if ($ExitCode -ne 0) { throw "${Label}: smc version exited with $ExitCode" }
+              if ($Expected -cnotmatch '^[0-9a-f]{16}$') { throw "${Label}: expected fingerprint is malformed: '$Expected'" }
+              $found = @($Lines | Where-Object { $_ -match 'Fingerprint' })
+              if ($found.Count -eq 0) { throw "${Label}: smc version printed no Source Fingerprint line" }
+              if ($found.Count -gt 1) { throw "${Label}: smc version printed $($found.Count) fingerprint lines" }
+              $m = [regex]::Match($found[0], '^Source Fingerprint: ([0-9a-f]{16})$')
+              if (-not $m.Success) { throw "${Label}: malformed fingerprint line: '$($found[0])'" }
+              $actual = $m.Groups[1].Value
+              if ($actual -cne $Expected) { throw "${Label}: source fingerprint $actual != expected $Expected" }
+              Write-Host "${Label}: source fingerprint $actual matches the qualified pin"
+          }
+          function Invoke-SmcFingerprintGate {
+              param([string] $Smc, [string] $Expected, [string] $Label)
+              if (-not (Test-Path -LiteralPath $Smc -PathType Leaf)) { throw "${Label}: smc is missing: $Smc" }
+              $out = & $Smc version
+              $code = $LASTEXITCODE
+              $lines = @($out | ForEach-Object { "$_".TrimEnd([char]13) })
+              Assert-SmcFingerprint -Lines $lines -ExitCode $code -Expected $Expected -Label $Label
+          }
+          function Assert-PayloadMatchesProvenance {
+              param([string] $BinDir, [string] $Provenance, [string] $Label)
+              $p = Get-Content -LiteralPath $Provenance -Raw | ConvertFrom-Json
+              foreach ($name in @("smc.exe", "svm.exe", "sm-launch.exe")) {
+                  $f = Join-Path $BinDir $name
+                  if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "${Label}: $name is missing in $BinDir" }
+                  $rec = $p.artifacts.binaries.$name
+                  if ($null -eq $rec -or "$($rec.sha256)" -cnotmatch '^[0-9a-f]{64}$') { throw "${Label}: provenance has no sha256 for $name" }
+                  $alg = [System.Security.Cryptography.SHA256]::Create()
+                  $fs = [System.IO.File]::OpenRead((Resolve-Path -LiteralPath $f).ProviderPath)
+                  try { $sha = -join ($alg.ComputeHash($fs) | ForEach-Object { $_.ToString("x2") }) } finally { $fs.Dispose(); $alg.Dispose() }
+                  $len = (Get-Item -LiteralPath $f).Length
+                  if ($sha -cne $rec.sha256 -or $len -ne [int64]$rec.bytes) { throw "${Label}: $name sha256 $sha/$len != provenance $($rec.sha256)/$($rec.bytes)" }
+                  Write-Host "${Label}: $name $sha $len matches provenance"
+              }
+          }
+          '@
+          . $gate
+          $good = @("Semantic Language Toolchain v0.1.0", "Source Fingerprint: 4dfa17a48b77e39f", "Release Signing:    unsigned")
+          Assert-SmcFingerprint -Lines $good -ExitCode 0 -Expected $env:EXPECTED_SMC_FINGERPRINT -Label "self-test accept"
+          $reject = [ordered]@{
+            "historical CRLF fingerprint" = @{ L = @("Source Fingerprint: 5c9354db6bf65e69"); C = 0; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "missing line"                = @{ L = @("Semantic Language Toolchain v0.1.0"); C = 0; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "empty output"                = @{ L = @(); C = 0; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "duplicate line"              = @{ L = @("Source Fingerprint: 4dfa17a48b77e39f", "Source Fingerprint: 4dfa17a48b77e39f"); C = 0; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "uppercase hex"               = @{ L = @("Source Fingerprint: 4DFA17A48B77E39F"); C = 0; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "short value"                 = @{ L = @("Source Fingerprint: 4dfa17a48b77e39"); C = 0; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "trailing text"               = @{ L = @("Source Fingerprint: 4dfa17a48b77e39f extra"); C = 0; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "nonzero exit"                = @{ L = $good; C = 1; E = $env:EXPECTED_SMC_FINGERPRINT }
+            "malformed expected"          = @{ L = $good; C = 0; E = "" }
+          }
+          foreach ($case in $reject.Keys) {
+            $c = $reject[$case]
+            $rejected = $false
+            try { Assert-SmcFingerprint -Lines $c.L -ExitCode $c.C -Expected $c.E -Label "self-test $case" } catch { $rejected = $true; Write-Host "rejected as required ($case): $($_.Exception.Message)" }
+            if (-not $rejected) { throw "fingerprint gate accepted a bad case: $case" }
+          }
+          $missingRejected = $false
+          try { Invoke-SmcFingerprintGate -Smc (Join-Path $env:RUNNER_TEMP "no-such-smc.exe") -Expected $env:EXPECTED_SMC_FINGERPRINT -Label "self-test missing binary" } catch { $missingRejected = $true }
+          if (-not $missingRejected) { throw "fingerprint gate accepted a missing binary" }
+          Write-Host "fingerprint gate self-test: 1 accept, $($reject.Count + 1) rejections"
 
       - name: Stage Artifacts
         run: |
@@ -53,6 +158,13 @@ jobs:
           cp upstream/target/release/svm.exe dist-staging/bin/
           cp launcher/sm-launch/target/release/sm-launch.exe dist-staging/bin/
         shell: bash
+
+      - name: Gate Staged smc Source Fingerprint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          . (Join-Path $env:RUNNER_TEMP "fingerprint_gate.ps1")
+          Invoke-SmcFingerprintGate -Smc "dist-staging/bin/smc.exe" -Expected $env:EXPECTED_SMC_FINGERPRINT -Label "staged smc"
 
       - name: Verify or Install Inno Setup
         run: |
@@ -70,6 +182,19 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: python ci/generate_build_provenance.py
+
+      - name: Verify Staged Payload Against Provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          . (Join-Path $env:RUNNER_TEMP "fingerprint_gate.ps1")
+          Assert-PayloadMatchesProvenance -BinDir "dist-staging/bin" -Provenance "build_provenance.json" -Label "staged payload"
+          $p = Get-Content build_provenance.json -Raw | ConvertFrom-Json
+          if ($p.upstream.pinned_commit_sha -cne $env:EXPECTED_UPSTREAM_SHA) { throw "provenance upstream $($p.upstream.pinned_commit_sha) != $($env:EXPECTED_UPSTREAM_SHA)" }
+          $inst = "packaging/windows/dist/Semantic-Setup-x64.exe"
+          $sha = (Get-FileHash -LiteralPath $inst -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -cne $p.artifacts.installer.sha256 -or (Get-Item $inst).Length -ne [int64]$p.artifacts.installer.bytes) { throw "installer does not match provenance" }
+          Write-Host "installer $sha matches provenance"
 
       - name: Run Noninteractive Smoke Check (Strict Exit Code Validation)
         shell: powershell
@@ -98,6 +223,8 @@ jobs:
           foreach ($f in @($smcExe, $svmExe, $launcherExe)) {
             if (-not (Test-Path $f)) { throw "Expected installed binary missing: $f" }
           }
+          . (Join-Path $env:RUNNER_TEMP "fingerprint_gate.ps1")
+          Assert-PayloadMatchesProvenance -BinDir $binDir -Provenance "build_provenance.json" -Label "installed payload (fresh PATH install)"
 
           Write-Host "3. Verifying PATH was added and registry flag recorded..."
           $postInstallPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -114,6 +241,7 @@ jobs:
           if ($smcVerProc.ExitCode -ne 0) {
             throw "smc version exited with failure code: $($smcVerProc.ExitCode)"
           }
+          Invoke-SmcFingerprintGate -Smc $smcExe -Expected $env:EXPECTED_SMC_FINGERPRINT -Label "installed smc (fresh PATH install)"
 
           Write-Host "5. Testing svm with compiled bytecode..."
           $testSmComp = Join-Path $env:TEMP "ci_compile_test.sm"
@@ -251,7 +379,9 @@ jobs:
           $p = Start-Process -FilePath "packaging/windows/dist/Semantic-Setup-x64.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`"", "/TASKS=`"`"" -Wait -PassThru -NoNewWindow
           if ($p.ExitCode -ne 0) { throw "install failed: $($p.ExitCode)" }
           $smc = Join-Path $dir "bin\smc.exe"
-          & $smc version
+          . (Join-Path $env:RUNNER_TEMP "fingerprint_gate.ps1")
+          Assert-PayloadMatchesProvenance -BinDir (Join-Path $dir "bin") -Provenance "build_provenance.json" -Label "installed payload (self-host install)"
+          Invoke-SmcFingerprintGate -Smc $smc -Expected $env:EXPECTED_SMC_FINGERPRINT -Label "installed smc (self-host install)"
           $c1 = (Resolve-Path selfhost-C1.smc).Path
           & $smc verify $c1; if ($LASTEXITCODE -ne 0) { throw "installed verifier rejected C1" }
           Write-Host "1. Wrong --expect-sha256 must be rejected"
@@ -287,6 +417,16 @@ jobs:
           Start-Sleep -Seconds 2
           if (Test-Path (Join-Path $dir "bin")) { throw "bin directory left behind" }
 
+      - name: Require Every Delivery File
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($f in @("packaging/windows/dist/Semantic-Setup-x64.exe", "build_provenance.json", "selfhost-C1.smc", "dist-staging/bin/smc.exe", "dist-staging/bin/svm.exe", "dist-staging/bin/sm-launch.exe")) {
+            if (-not (Test-Path -LiteralPath $f -PathType Leaf) -or (Get-Item -LiteralPath $f).Length -le 0) { throw "delivery file missing or empty: $f" }
+          }
+          . (Join-Path $env:RUNNER_TEMP "fingerprint_gate.ps1")
+          Assert-PayloadMatchesProvenance -BinDir "dist-staging/bin" -Provenance "build_provenance.json" -Label "exported payload"
+
       - name: Upload Unsigned Installer and Provenance Manifest
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
@@ -295,4 +435,7 @@ jobs:
             packaging/windows/dist/Semantic-Setup-x64.exe
             build_provenance.json
             selfhost-C1.smc
+            dist-staging/bin/smc.exe
+            dist-staging/bin/svm.exe
+            dist-staging/bin/sm-launch.exe
           if-no-files-found: error
