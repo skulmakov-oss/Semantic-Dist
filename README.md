@@ -2,7 +2,7 @@
 
 Repository: `skulmakov-oss/Semantic-Dist`  
 Authoritative Compiler Repository: `skulmakov-oss/Semantic`  
-Upstream Pinned SHA: `07b3dee3a6ef244f7846371d460521833c907efa` (exact rc.2 candidate; to be replaced by the integrated main commit before merge)  
+Upstream Pinned SHA: `07b3dee3a6ef244f7846371d460521833c907efa` (integrated upstream main for rc.2)  
 Release Target: `v1.3.0-rc.2` (candidate; `v1.3.0-rc.1` at `fbb49594` unpublished; previous preview `v1.3.0-beta.1`)
 
 ---
