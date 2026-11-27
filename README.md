@@ -7,6 +7,8 @@ Latest release: [`v1.3.0-rc.2`](https://github.com/skulmakov-oss/Semantic-Dist/r
 
 ---
 
+**New here?** Read [docs/getting_started.md](docs/getting_started.md): repository roles, portable CLI, installer, source builds on the four qualified targets, and the self-hosted compiler.
+
 ## Quick start (portable CLI)
 Download `semantic-language-windows-x64-v1.3.0-rc.2.zip` from the [release](https://github.com/skulmakov-oss/Semantic-Dist/releases/tag/v1.3.0-rc.2) and check it against `SHA256SUMS`. Then unzip it, open PowerShell in the folder, and save a `hello.sm`:
 ```
