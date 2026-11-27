@@ -1,6 +1,6 @@
 # Language reference (v1.3.0-rc.2)
 
-Organised by topic. Each section names its **normative** source at the tag and the **observed** examples (user manual chapters in [docs/manual](../manual/)). Status words follow the evidence levels in [README.md](README.md). Constructs without an observed example are marked *not verified here*.
+Organised by topic. Each section names its **normative** source at the tag and its **observed** evidence: the first manual chapter ([docs/manual/01_first_programs.md](../manual/01_first_programs.md)) or the probe record [observations.md](observations.md). Status words follow the evidence levels in [README.md](README.md). Constructs without an observed example are marked *not verified here*.
 
 ## 1. Lexical structure
 Normative: [`syntax.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/syntax.md), [`source_style.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/source_style.md).
@@ -41,7 +41,7 @@ Normative: [`source_semantics.md`](https://github.com/skulmakov-oss/Semantic/blo
 
 ## 7. Modules, projects and packages
 Normative: [`modules.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/modules.md), [`project_model_v0.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/project_model_v0.md), [`package_baseline_v0.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/package_baseline_v0.md).
-- Observed (manual ch2): `semantic.toml` with `[project] entry`; `Import "lib.sm" { double }`; `Semantic.package` with `dep <alias> <name> <path>` and `Import "m::main.sm"`; rejections for a missing dependency and for an entry that escapes the root.
+- Observed ([observations.md](observations.md#projects-and-packages)): `semantic.toml` with `[project] entry`; `Import "lib.sm" { double }`; `Semantic.package` with `dep <alias> <name> <path>` and `Import "m::main.sm"`; rejections for a missing dependency and for an entry that escapes the root.
 
 ## 8. Ownership and borrowing
 Normative: [`runtime_ownership.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/runtime_ownership.md).
@@ -50,17 +50,17 @@ Normative: [`runtime_ownership.md`](https://github.com/skulmakov-oss/Semantic/bl
 
 ## 9. Capabilities and the host boundary
 Normative: [`capabilities.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/capabilities.md), [`controlled_application_boundary_v0.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/controlled_application_boundary_v0.md), [`abi.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/abi.md).
-- Observed (manual ch3): `args_read`, `fs_read_text`, `fs_write_text` and `stdout_write` under the profiles `pure`, `cli-read-only` and `cli-file-transform`. Every denial exited 1 and wrote nothing.
+- Observed ([observations.md](observations.md#capabilities-run-in-f08_file_transformsandbox)): `args_read`, `fs_read_text`, `fs_write_text` and `stdout_write` under the profiles `pure`, `cli-read-only` and `cli-file-transform`. Every denial exited 1 and wrote nothing.
 
 ## 10. Diagnostics
 Normative: [`diagnostics.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/diagnostics.md), [`diagnostics_machine_schema_v1.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/diagnostics_machine_schema_v1.md), [`ERROR_CODES.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/ERROR_CODES.md).
-- Observed (manual ch5): `--format json` (schema `semantic.diagnostics` v1), `explain E0201`, E0005/E0201 messages. Every measured failure exited 1.
+- Observed ([observations.md](observations.md#artifacts-and-diagnostics)): `--format json` (schema `semantic.diagnostics` v1), `explain E0201`, E0005/E0201 messages. Every measured failure exited 1.
 
 ## 11. Artifacts, verifier, VM and quotas
 Normative: [`semcode.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/semcode.md), [`verifier.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/verifier.md), [`vm.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/vm.md), [`quotas.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/quotas.md), [`ir.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/ir.md).
-- Observed (manual ch4): compile → verify → run; `artifact hash`/`inspect`; `disasm`; `--expect-sha256`; header `SEMCOD22` (epoch 0, rev 23).
+- Observed ([observations.md](observations.md#artifacts-and-diagnostics)): compile → verify → run; `artifact hash`/`inspect`; `disasm`; `--expect-sha256`; header `SEMCOD22` (epoch 0, rev 23).
 - Declared status: SemCode floor `SEMCOD22`, promotions `SEMCOD23`–`SEMCOD25`.
 
 ## 12. Compiler subset (C1)
 Normative (Semantic-Language): [`BOOTSTRAP_SUBSET.md`](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/BOOTSTRAP_SUBSET.md).
-- Observed (manual ch6): C1 output is byte-identical to `smc compile` for 6 programs. C1 rejects `Import` and capability calls with an `error` line while `run-smc` exits 0 (findings F6).
+- Observed ([observations.md](observations.md#frozen-c1-semantic-selfhost-compiler-c1smc-sha256-2bfd56e1)): C1 output is byte-identical to `smc compile` for 6 programs. C1 rejects `Import` and capability calls with an `error` line while `run-smc` exits 0 (findings F6).

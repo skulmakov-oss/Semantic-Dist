@@ -5,6 +5,7 @@ A user-facing **reference**, kept separate from the normative contracts. It neve
 - [language.md](language.md): language reference, by topic.
 - [quad_logic.md](quad_logic.md): four-valued logic reference; every operator cell is observed.
 - [findings.md](findings.md): unresolved discrepancies and observations.
+- [observations.md](observations.md): the exact probe commands and results behind the "observed" statements.
 
 Pinned identities: Semantic tag `v1.3.0-rc.2` = `98f9db199b28d6b126873f8f445aaff49b83d674`; tool = public rc.2 portable `smc.exe`, source fingerprint `4dfa17a48b77e39f`.
 
@@ -21,7 +22,7 @@ Pinned identities: Semantic tag `v1.3.0-rc.2` = `98f9db199b28d6b126873f8f445aaff
 | Area | Normative source | Observed here | Not verified here |
 |---|---|---|---|
 | Quad values, operators, Boolean boundary | yes | all 4×4 / 4×1 cells (544 runs) | packed source types (none exist in source) |
-| Declarations, types, control flow | yes | the forms used in the user manual | loops (`loop`/`break`/`continue`/`for`), tuples, enums, closures, generics |
-| Modules, projects, packages | yes | manual ch2 | alias imports (documented limit) |
-| Capabilities | yes | manual ch3 | profiles other than `pure` / `cli-read-only` / `cli-file-transform` |
-| Diagnostics, artifacts | yes | manual ch4–5 | every error code |
+| Declarations, types, control flow | yes | the forms in manual chapter 1 | loops (`loop`/`break`/`continue`/`for`), tuples, enums, closures, generics |
+| Modules, projects, packages | yes | observations.md | alias imports (documented limit) |
+| Capabilities | yes | observations.md | profiles other than `pure` / `cli-read-only` / `cli-file-transform` |
+| Diagnostics, artifacts | yes | observations.md | every error code |
