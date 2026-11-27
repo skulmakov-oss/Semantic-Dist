@@ -1,11 +1,13 @@
 # 1. First programs
 
-Every example here was saved to a file and run with the **public rc.2 portable `smc.exe`** (source fingerprint `4dfa17a48b77e39f`), as `.\smc.exe check <file>` and `.\smc.exe run <file>`. Exit code `0` means success. A failed `assert` or any error gives exit code `1`.
+Every example here was saved to a file and run with the **public rc.2 portable `smc.exe`** (source fingerprint `4dfa17a48b77e39f`), as `.\smc.exe check <file>` and `.\smc.exe run <file>`. Exit code `0` means success. In every failing case run for this chapter (a failed `assert`, a syntax error, a type error), the exit code was `1`.
 
 Language rules are defined normatively in [docs/spec @ v1.3.0-rc.2](https://github.com/skulmakov-oss/Semantic/tree/v1.3.0-rc.2/docs/spec). This chapter only shows the common forms.
 
 ## 1.1 The smallest program
-Every program has `fn main()`, which ends with `return;`. `assert(condition)` stops the program with exit code 1 when the condition is false.
+The entry point is `fn main()`. `assert(condition)` stops the program with exit code 1 when the condition is false.
+
+A final `return;` in a function without a return value is allowed but **not required**. On rc.2, `fn main() { assert(1 + 1 == 2); }` and an empty `fn main() {}` both pass `check` and `run`. The examples in this manual keep `return;` for clarity.
 ```
 fn main() {
     assert(1 + 1 == 2);
@@ -76,7 +78,11 @@ fn main() {
 *Run:* exits 0.
 
 ## 1.5 Four-state values: `quad`
-`quad` has four states: `N` (null/unknown), `F` (false), `T` (true) and `S` (conflict). It is **not** a `bool`. To branch on a `quad`, compare it explicitly or use `match`.
+`quad` has four values ([types.md](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/types.md)): `N` means unknown, `F` false, `T` true, `S` conflict.
+- `N` is a `quad` *value*. It is not a null pointer and not `Option::None`; use `Option` for an absent value (§1.6).
+- `S` is the fourth `quad` value. A `bool` has only `true` and `false`, and `quad` is **not** a `bool`.
+
+To branch on a `quad`, compare it explicitly or use `match`.
 ```
 fn main() {
     let signal: quad = T;
@@ -121,7 +127,7 @@ fn main() {
 ```
 *Run:* exits 0.
 
-> **Observed in rc.2:** a `match` on `quad` needs a `_` arm. Listing `N`, `F`, `T` and `S` explicitly, without `_`, is rejected with `match requires default arm '_'`.
+> **Required by the specification, and observed in rc.2:** [source_semantics.md](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/source_semantics.md) states that a `quad` `match` still requires an explicit default arm `_`. Listing `N`, `F`, `T` and `S` explicitly without `_` is rejected with `match requires default arm '_'`.
 
 ## 1.6 Optional values: `Option`
 ```
