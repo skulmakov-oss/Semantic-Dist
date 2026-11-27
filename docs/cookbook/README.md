@@ -546,6 +546,8 @@ def verify(a, path):
     rc, out, err, o_over, e_over, t_out = run_bounded([a.smc, 'verify', path], os.path.dirname(path), a.verify_timeout, 1 << 20, 1 << 20)
     if t_out:
         raise Outcome(5, 'verifier timed out')
+    if o_over or e_over:
+        raise Outcome(4, 'verifier output exceeded the capture limit; artifact not accepted')
     if rc != 0:
         raise Outcome(4, 'smc verify rejected the artifact', verify_exit=rc)
 
