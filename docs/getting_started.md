@@ -49,6 +49,8 @@ fn main() {
 .\smc.exe artifact hash hello.smc         # sha256:3b1113fedd90ff0e9c8c4ca99123e35c3fe80c41e18aedf5dd66de16eda7a264
 ```
 
+> **Version numbers.** `smc version` prints `Semantic Language Toolchain v0.1.0`, and `smc version --json` reports `"toolchain_version": "0.1.0"`. That is the upstream toolchain's own version field. It is independent of the distribution release number `v1.3.0-rc.2`. To identify a build, use the `Source Fingerprint` (`4dfa17a48b77e39f`) and `build_provenance.json`, not the toolchain version.
+
 ## 3. Windows x64: installer
 `Semantic-Setup-x64.exe` installs `smc`, `svm` and `sm-launch` per user, under `%LOCALAPPDATA%\Programs\Semantic`. It can optionally add them to your user PATH. Uninstall from *Settings → Apps*.
 
