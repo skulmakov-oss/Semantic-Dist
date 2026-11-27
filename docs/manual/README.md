@@ -4,6 +4,7 @@ A practical guide for writing and running Semantic programs with the published `
 
 - **Normative language rules:** the upstream specifications at the release tag, [docs/spec @ v1.3.0-rc.2](https://github.com/skulmakov-oss/Semantic/tree/v1.3.0-rc.2/docs/spec). If this manual and the specification disagree, the specification wins.
 - **Getting the tools:** [getting_started.md](../getting_started.md).
+- **See also:** the [reference](../reference/README.md), the [CLI reference](../cli/README.md) and the [cookbook](../cookbook/README.md).
 
 ## Chapters
 | # | Chapter | Status |

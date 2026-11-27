@@ -9,6 +9,8 @@
 
 **How the outputs were produced:** every recipe was run with these binaries, each in a fresh empty directory, under PowerShell 7 (`pwsh`) with `smc.exe` on `PATH`. The outputs below are copied from those runs; directory prefixes are shortened to `…`. A run that matches is *observed* behaviour of these binaries; it is **not** a formal qualification.
 
+**Running the steps:** each step was run as one script fragment, `pwsh -NoProfile -Command "<step>"`, so the exit code shown is that command's exit code. Some steps end with `exit`. Typed into an interactive PowerShell window, `exit` closes the window; run such steps as a script, or with `pwsh -NoProfile -Command`. Start each recipe in a new empty folder, so that no output from an earlier run is reused.
+
 Normative sources stay authoritative:
 - Semantic [`docs/spec/cli.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/cli.md) and [`controlled_application_boundary_v0.md`](https://github.com/skulmakov-oss/Semantic/blob/v1.3.0-rc.2/docs/spec/controlled_application_boundary_v0.md) at the tag;
 - for C1, Semantic-Language [`compiler/driver.sm` @ `5b404e5`](https://github.com/skulmakov-oss/Semantic-Language/blob/5b404e5/compiler/driver.sm).

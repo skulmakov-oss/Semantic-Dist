@@ -9,6 +9,14 @@ Latest release: [`v1.3.0-rc.2`](https://github.com/skulmakov-oss/Semantic-Dist/r
 
 **New here?** Read [docs/getting_started.md](docs/getting_started.md): repository roles, portable CLI, installer, source builds on the four qualified targets, and the self-hosted compiler.
 
+**Documentation** (v1.3.0-rc.2; non-normative, the upstream specifications at the release tag win):
+- [Getting started](docs/getting_started.md): install, verify, first run.
+- [User manual](docs/manual/README.md): tutorial chapters, every example run.
+- [Cookbook](docs/cookbook/README.md): self-contained recipes with expected outputs and negative controls.
+- [CLI reference](docs/cli/README.md): `smc` and `svm` commands, exit codes, and the fail-closed acceptance rule for C1 output.
+- [Language and quad logic reference](docs/reference/README.md), plus the [architecture reference](docs/reference/architecture.md).
+- [Status glossary](docs/status_glossary.md): published, qualified, validated, reproduced, accepted.
+
 ## Quick start (portable CLI)
 Download `semantic-language-windows-x64-v1.3.0-rc.2.zip` from the [release](https://github.com/skulmakov-oss/Semantic-Dist/releases/tag/v1.3.0-rc.2) and check it against `SHA256SUMS`. Then unzip it, open PowerShell in the folder, and save a `hello.sm`:
 ```
