@@ -29,6 +29,9 @@ The binaries are unsigned. Install and uninstall are verified on GitHub-hosted r
 
 ## Overview
 
+Status terms used in this repository (published, prerelease, qualified, validated, reproduced, accepted, stable) are defined in [docs/status_glossary.md](docs/status_glossary.md).
+
+
 `Semantic-Dist` is the independent native distribution and installer repository for the Semantic Language.
 
 ### Developer Preview: Windows x64 Installer
