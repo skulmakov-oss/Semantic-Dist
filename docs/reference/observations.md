@@ -10,7 +10,7 @@ Exact commands and results behind the "observed" statements in [language.md](lan
 | `ch2.test_project` | `smc.exe test f06_project` | 0 | ok tests/double.sm test result: ok. 1 passed |
 | `ch2.run_packages` | `smc.exe run f06_packages/app` | 0 | (no output) |
 | `ch2.package_inspect` | `smc.exe package inspect f06_packages/app` | 0 | {   "fingerprint_algorithm": "fnv1a64-non-cryptographic",   "graph_fingerprint": "fnv1a64:afddee7547fe317f",   "packages": [     {       "ca |
-| `ch2.neg_missing_dep` | `smc.exe run f06_package_missing_dep` | 1 | package module admission error: dependency alias 'missing' expected Semantic.package at '\\?\<HOME>\Semantic_Compiler_Recovery\evidence\SEMA |
+| `ch2.neg_missing_dep` | `smc.exe run f06_package_missing_dep` | 1 | package module admission error: dependency alias 'missing' expected Semantic.package at '…\does_not_exist\Semantic.package' (absolute path shortened) |
 | `ch2.neg_entry_escape` | `smc.exe check f06_project_entry_escape` | 1 | failed to parse 'f06_project_entry_escape\semantic.toml': project entry '../main.sm' must not escape the project root |
 
 ## Capabilities (run in `f08_file_transform/sandbox`)
