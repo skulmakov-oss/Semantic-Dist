@@ -21,8 +21,8 @@ Normative sources (tag): [`quad_logic_frame_v1.md`](https://github.com/skulmakov
 | Family | Source form | Result | Plane formula | Declared status (`smc language describe`) |
 |---|---|---|---|---|
 | Identity predicate | `a == b`, `a != b` | `bool` | same / different value | — |
-| Knowledge lattice (legacy operators) | `a && b`, `a || b`, `!a`, `a -> b` | `quad` | meet `(a.t&b.t, a.f&b.f)`; join `(a.t|b.t, a.f|b.f)`; `!a=(a.f,a.t)`; `a->b=(a.f|b.t, a.t|b.f)` | `logic.quad.and_or`: **current-main-experimental** |
-| Truth map (Belnap) | `qtruth_and`, `qtruth_or`, `qtruth_not`, `qtruth_impl` | `quad` | `(a.t&b.t, a.f|b.f)`; `(a.t|b.t, a.f&b.f)`; `(a.f,a.t)`; `(a.f|b.t, a.t|b.f)` | `std.quad`: **Selected** in foundation_stdlib_v0.md |
+| Knowledge lattice (legacy operators) | `a && b`, `a \|\| b`, `!a`, `a -> b` | `quad` | meet `(a.t&b.t, a.f&b.f)`; join `(a.t\|b.t, a.f\|b.f)`; `!a=(a.f,a.t)`; `a->b=(a.f\|b.t, a.t\|b.f)` | `logic.quad.and_or`: **current-main-experimental** |
+| Truth map (Belnap) | `qtruth_and`, `qtruth_or`, `qtruth_not`, `qtruth_impl` | `quad` | `(a.t&b.t, a.f\|b.f)`; `(a.t\|b.t, a.f&b.f)`; `(a.f,a.t)`; `(a.f\|b.t, a.t\|b.f)` | `std.quad`: **Selected** in foundation_stdlib_v0.md |
 
 The specification states that the families "never alias each other". Implementation note (observed in the tag source): the lattice operators use the `QAnd`/`QOr`/`QNot`/`QImpl` opcodes; the truth map uses `QTruthAnd`/`QTruthOr`/`QTruthNot`/`QTruthImpl`.
 
@@ -34,7 +34,7 @@ The specification states that the families "never alias each other". Implementat
 | **T** | N | N | T | T |
 | **S** | N | F | T | S |
 
-| a || b | N | F | T | S |
+| `a \|\| b` | N | F | T | S |
 |---|---|---|---|---|
 | **N** | N | F | T | S |
 | **F** | F | F | S | S |
@@ -83,8 +83,8 @@ The specification states that the families "never alias each other". Implementat
 ## 4. Two implications
 | | Definition | Observed table (rows N,F,T,S) |
 |---|---|---|
-| **Legacy implication** `a -> b` and `qtruth_impl(a, b)` | `NOT(a) join b` = `(a.f|b.t, a.t|b.f)` (normative, frozen; `qtruth_impl(T,T) = S`) | N F T S / T S T S / F F S S / S S S S |
-| **Conventional material implication** in the truth map, written `qtruth_or(qtruth_not(a), b)` | `(a.f|b.t, a.t&b.f)` | N N T T / T T T T / N F T S / T S T S |
+| **Legacy implication** `a -> b` and `qtruth_impl(a, b)` | `NOT(a) join b` = `(a.f\|b.t, a.t\|b.f)` (normative, frozen; `qtruth_impl(T,T) = S`) | N F T S / T S T S / F F S S / S S S S |
+| **Conventional material implication** in the truth map, written `qtruth_or(qtruth_not(a), b)` | `(a.f\|b.t, a.t&b.f)` | N N T T / T T T T / N F T S / T S T S |
 
 - The legacy rule is **not** conventional material implication. For example, `T -> T` is `S`, not `T`.
 - `a -> b` and `qtruth_impl` give the same table, but they are separate operations with different opcodes. Identical output does not mean identical implementation.
@@ -94,7 +94,7 @@ Both orders are **mathematically derived** from the normative plane formulas. Th
 
 | Order | Definition | Covering edges | Consistency check |
 |---|---|---|---|
-| Knowledge order ≤k | `a ≤k b` iff `a.t ≤ b.t` and `a.f ≤ b.f` | N < F, N < T, F < S, T < S | `&&` = greatest lower bound and `||` = least upper bound in 16/16 cells |
+| Knowledge order ≤k | `a ≤k b` iff `a.t ≤ b.t` and `a.f ≤ b.f` | N < F, N < T, F < S, T < S | `&&` = greatest lower bound and `\|\|` = least upper bound in 16/16 cells |
 | Truth order ≤t | `a ≤t b` iff `a.t ≤ b.t` and `a.f ≥ b.f` | N < T, F < N, F < S, S < T | `qtruth_and` = glb and `qtruth_or` = lub in 16/16 cells |
 
 Bottom/top: knowledge `N`/`S`; truth `F`/`T`.

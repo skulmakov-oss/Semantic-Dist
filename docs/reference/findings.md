@@ -45,7 +45,7 @@ Alternatives: (a) add the three aliases in a future source change; (b) mark them
 | ID | Observation |
 |---|---|
 | F3 | `a -> b` and `qtruth_impl` have identical tables but distinct opcodes. Both differ from conventional material implication ([quad_logic.md §4](quad_logic.md)). |
-| F4 | Quad `&&`/`||` are declared **current-main-experimental**; bool `&&`/`||` are foundation-included. |
+| F4 | Quad `&&`/`\|\|` are declared **current-main-experimental**; bool `&&`/`\|\|` are foundation-included. |
 | F5 | `semantic_stable_foundation_matrix.md` at the tag is an SSF-00 snapshot; its release facts predate the published v1.2.0. |
 | F6 | `run-smc` with the frozen C1 exits 0 when C1 rejects a program; the rejection is an `error …` line ([observations.md](observations.md)). |
 | F7 | `_` is required in a `quad` `match` (normative), unlike an exhaustive enum `match`. |
