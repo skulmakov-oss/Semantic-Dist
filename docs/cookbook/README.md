@@ -367,8 +367,10 @@ non-zero, or timeout), 3 PROTOCOL_FAILURE (missing/ambiguous/malformed/oversized
 
 Threat model: a caller-controlled scratch directory without hostile same-user activity.
 Concurrent creation of --out is detected and never overwritten; this is not a defence
-against a hostile process of the same user. If printing the JSON line fails after
-publication, the exit code still reports the outcome and the verified artifact stays.
+against a hostile process of the same user. If printing the JSON line fails (also after
+publication), the process exits immediately with the outcome code; the verified artifact stays.
+--root, --c1 and a --smc containing a path separator are resolved against the caller's
+directory; --input is relative to --root.
 """
 import argparse, hashlib, json, os, re, subprocess, sys, tempfile, threading
 
@@ -412,6 +414,11 @@ def parse_args(argv):
     p.add_argument('--run-timeout', type=bounded_int(1, 86400), default=3600)
     p.add_argument('--verify-timeout', type=bounded_int(1, 86400), default=600)
     a = p.parse_args(argv)
+    # Resolve filesystem paths against the caller's directory before any child changes cwd.
+    a.root = os.path.abspath(a.root)
+    a.c1 = os.path.abspath(a.c1)
+    if os.sep in a.smc or (os.altsep and os.altsep in a.smc):
+        a.smc = os.path.abspath(a.smc)  # a bare name keeps PATH lookup
     for name in ('c1_sha256', 'expect_sha256'):
         v = getattr(a, name)
         if v is not None:
@@ -598,7 +605,11 @@ def accept(a):
                 pass
 
 
+REPORT_FAILED = False
+
+
 def main(argv=None):
+    global REPORT_FAILED
     try:
         result = accept(parse_args(sys.argv[1:] if argv is None else argv))
     except Outcome as o:
@@ -609,12 +620,15 @@ def main(argv=None):
         sys.stdout.write(json.dumps(result, sort_keys=True) + '\n')
         sys.stdout.flush()
     except Exception:
-        pass  # the exit code remains authoritative
+        REPORT_FAILED = True  # the exit code remains authoritative
     return result['code']
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    code = main()
+    if REPORT_FAILED:
+        os._exit(code)  # skip interpreter-exit flushing of the failed stream (it would turn the code into 120)
+    sys.exit(code)
 ```
 
 **Also needed:** the release asset `semantic-selfhost-compiler-C1.smc`, saved as `C1.smc`.
@@ -668,7 +682,8 @@ True
 
 **Limits**
 - The checker assumes a folder you control. It detects an output file that appears concurrently and leaves it untouched; it is not a defence against a hostile process of the same user.
-- If printing the JSON line fails after publication, the exit code still reports the outcome.
+- If printing the JSON line fails (also after publication), the checker exits immediately with the outcome code.
+- `--root`, `--c1` and an `--smc` path containing a separator are resolved against the folder you run the command from; `--input` is relative to `--root`. A bare `--smc` name is looked up on `PATH`.
 - The deterministic test suite used to qualify this exact file is not part of this page. This is observed behaviour, not formal qualification.
 
 ## Notes
