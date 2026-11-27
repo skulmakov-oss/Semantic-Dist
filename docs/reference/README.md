@@ -6,6 +6,9 @@ A user-facing **reference**, kept separate from the normative contracts. It neve
 - [quad_logic.md](quad_logic.md): four-valued logic reference; every operator cell is observed.
 - [findings.md](findings.md): unresolved discrepancies and observations.
 - [observations.md](observations.md): the exact probe commands and results behind the "observed" statements.
+- [architecture.md](architecture.md): repositories, pipeline, artifact identity, quotas, Bootstrap and provenance.
+
+See also: the [user manual](../manual/README.md), the [CLI reference](../cli/README.md) and the [cookbook](../cookbook/README.md).
 
 Pinned identities: Semantic tag `v1.3.0-rc.2` = `98f9db199b28d6b126873f8f445aaff49b83d674`; tool = public rc.2 portable `smc.exe`, source fingerprint `4dfa17a48b77e39f`.
 
