@@ -9,11 +9,12 @@ A practical guide for writing and running Semantic programs with the published `
 | # | Chapter | Status |
 |---|---|---|
 | 1 | [First programs](01_first_programs.md): values, functions, control flow, `quad`, `Option`, records, errors | draft; every example run with the public rc.2 `smc` |
-| 2 | Projects and imports (`smc` project roots, modules) | planned |
-| 3 | Capabilities and the host boundary (file read/write, stdout, profiles) | planned |
-| 4 | Artifacts: compile, verify, hash, `run-smc --expect-sha256` | planned |
-| 5 | Diagnostics and error codes | planned; will reference docs/ERROR_CODES.md |
-| 6 | The self-hosted compiler (C1) and the Bootstrap Subset | planned |
+| 2 | [Projects, imports and packages](02_projects.md) | draft; run (rc.2 tag examples) |
+| 3 | [Capabilities and the host boundary](03_capabilities.md) | draft; run, including denials |
+| 4 | [Artifacts: compile, verify, hash, run](04_artifacts.md) | draft; run |
+| 5 | [Diagnostics and exit codes](05_diagnostics.md) | draft; run |
+| 6 | [The self-hosted compiler (C1) and the Bootstrap Subset](06_selfhost_c1.md) | draft; run (fixed-point reproduction not run) |
+| 7–10 | [Proposed: quad logic, collections, types, memory](next_sections.md) | planning only |
 
 **Conventions:**
 - Commands are PowerShell, run inside the folder where the rc.2 portable zip was extracted.
