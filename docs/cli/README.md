@@ -17,18 +17,25 @@ C1 is an ordinary Semantic program. It returns normally and **exits 0 both when 
 
 Capability audit lines go to stderr.
 
-Automation must fail closed. Accept only if **all** of the following hold:
-1. `run-smc` exited 0 (otherwise: VM, envelope or identity failure; there is no compiler result).
-2. stdout holds **exactly one** non-empty line.
-3. That line matches `hex ((?:[0-9a-f]{2})+)` in full, and the decoded bytes start with the SemCode magic `SEMCOD`.
-4. The decoded artifact, written to a file, passes `smc verify`.
+Automation must fail closed. Process one run as follows:
 
-A well-formed `error …` line is a **rejection**. A missing, repeated, mixed, truncated, odd-length, upper-case or otherwise malformed result is a **failure**, never an acceptance. Checking only that the line starts with `hex` is not enough.
+1. **Before running:** the output path must not exist and must not be any of the input, C1 or `smc` paths.
+2. **Capture:** read stdout and stderr with byte limits enforced while reading, and with a time limit. Exceeding a limit, or a non-zero `run-smc` exit, means there is no admissible result. This is a VM failure, even if stdout looks valid.
+3. **Classify:** stdout must be ASCII and **exactly one** non-empty line, with at most one trailing LF or CRLF.
+   - The line must match `hex ((?:[0-9a-f]{2})+)` in full, or
+   - `error (syntax|name|type|context|unsupported) @(0|[1-9][0-9]{0,9}): ([\x20-\x7e]+)` in full, with an offset of at most 4294967295.
+   - A valid `error` line is a **rejection**. Anything else is a protocol failure, never an acceptance. Checking only that the line starts with `hex` is not enough.
+4. **Admit:** the decoded bytes must start with `SEMCOD`. Write them to a new temporary file next to the output and run `smc verify` on it. Re-hash the file you verified (and compare with `--expect-sha256` if given).
+5. **Publish:** move it to the output path with a **no-replace** operation (on Windows a plain rename, which fails if the target exists). Never use an overwriting rename. Remove the temporary file on every failure.
+
+**Outcomes:** 0 accepted, 1 rejected, 2 VM failure, 3 protocol failure, 4 verify failure, 5 tool failure.
+
+The Cookbook, recipe 07, contains a reference checker that implements this and its observed runs.
 
 Observed with the public rc.2 binaries and the release C1 (sha256 `2bfd56e1…`):
-- An accepted program produced one `hex` line, the decoded artifact passed `smc verify`, and it was byte-identical to `smc compile`.
-- A program calling `fs_write_text` produced `error name @37: unknown function 'fs_write_text'` with exit 0.
-- A truncated copy of a valid artifact failed `smc verify` (exit 1).
+- An accepted program was published byte-identical to `smc compile` output.
+- A program calling `fs_write_text` was classified as a rejection (`error name @37`), with nothing written.
+- A second run to the same output path was refused and left the existing file unchanged.
 
 These checks are observed, not a formal qualification.
 

@@ -326,7 +326,9 @@ quota exceeded: Steps limit=100000 used=100001
 
 ## 07. Compile with the frozen self-hosted compiler (C1) and accept fail-closed
 
-`run-smc` exit 0 only means the VM finished. Accept C1 output only after validating its single result line and verifying the decoded artifact.
+`run-smc` exit 0 only means the VM finished. C1 exits 0 also when it **rejects** a program. The checker below runs C1 itself and classifies its single result line. It verifies the decoded artifact with `smc verify`, and only then publishes it to a **new** file. It never overwrites an existing file.
+
+**Run it** in a new empty folder created for this recipe; the checker refuses an output path that already exists. Python 3 is required (`python -I`). The checker captures the compiler's output itself, so no shell redirection is involved.
 
 **Files:**
 
@@ -348,66 +350,330 @@ fn main() {
 }
 ```
 
-`c1_accept.py`: a reference checker, standard library only. Run it with `python -I`.
+`c1_accept3.py`: reference checker, standard library only, embedded exactly as tested.
 ```python
-"""Fail-closed acceptance check for one run of the frozen C1 compiler under 'smc run-smc'.
-Usage: python -I c1_accept.py <run_smc_exit_code> <stdout_file> <out.smc>
-Exit 0  ACCEPTED_CANDIDATE: artifact written to <out.smc>; the caller MUST still run 'smc verify <out.smc>'.
-Exit 1  REJECTED: C1 printed a well-formed 'error <cat> @<offset>: <msg>' result.
-Exit 2  FAILED: VM/run failure, or missing, ambiguous or malformed result. Never treat as acceptance."""
-import re, sys
-CATS = 'syntax|name|type|context|unsupported'
-def done(code, msg): print(msg); sys.exit(code)
-if len(sys.argv) != 4: done(2, 'FAILED usage')
-try: rc = int(sys.argv[1])
-except ValueError: done(2, 'FAILED bad exit code argument')
-if rc != 0: done(2, 'FAILED run-smc exit %d (VM or envelope failure, no compiler result)' % rc)
-try: raw = open(sys.argv[2], 'rb').read().decode('utf-8')
-except (OSError, UnicodeDecodeError) as e: done(2, 'FAILED unreadable stdout: ' + type(e).__name__)
-lines = [l for l in raw.replace('\r\n', '\n').split('\n') if l != '']
-if len(lines) != 1: done(2, 'FAILED expected exactly one result line on stdout, got %d' % len(lines))
-line = lines[0]
-m = re.fullmatch(r'hex ((?:[0-9a-f]{2})+)', line)
-if m:
-    data = bytes.fromhex(m.group(1))
-    if not data.startswith(b'SEMCOD'): done(2, 'FAILED decoded bytes lack the SemCode magic')
-    open(sys.argv[3], 'wb').write(data)
-    done(0, 'ACCEPTED_CANDIDATE %d bytes; run: smc verify %s' % (len(data), sys.argv[3]))
-if re.fullmatch(r'error (%s) @\d+: .+' % CATS, line): done(1, 'REJECTED ' + line)
-done(2, 'FAILED malformed result line')
+"""Fail-closed acceptance of one frozen-C1 compilation (RFC-01 F6, checker v3).
+
+Runs 'smc run-smc' with the pinned C1, classifies its single result line, verifies the
+decoded artifact with 'smc verify', and publishes it without ever replacing an existing
+file. The exit code is the outcome; one JSON line on stdout explains it.
+
+  python -I c1_accept3.py --smc SMC --c1 C1.smc --c1-sha256 HEX --root DIR --input FILE
+                          --out NEW.smc [--expect-sha256 HEX] [limits]
+
+Outcomes: 0 ACCEPTED, 1 REJECTED (well-formed compiler rejection), 2 VM_FAILURE (run-smc
+non-zero, or timeout), 3 PROTOCOL_FAILURE (missing/ambiguous/malformed/oversized output),
+4 VERIFY_FAILURE (header, verifier, hash), 5 TOOL_FAILURE (usage, I/O, collision, alias).
+
+Threat model: a caller-controlled scratch directory without hostile same-user activity.
+Concurrent creation of --out is detected and never overwritten; this is not a defence
+against a hostile process of the same user. If printing the JSON line fails after
+publication, the exit code still reports the outcome and the verified artifact stays.
+"""
+import argparse, hashlib, json, os, re, subprocess, sys, tempfile, threading
+
+OUTCOMES = {0: 'ACCEPTED', 1: 'REJECTED', 2: 'VM_FAILURE', 3: 'PROTOCOL_FAILURE', 4: 'VERIFY_FAILURE', 5: 'TOOL_FAILURE'}
+HEX_LINE = re.compile(r'hex ((?:[0-9a-f]{2})+)')
+ERR_LINE = re.compile(r'error (syntax|name|type|context|unsupported) @(0|[1-9][0-9]{0,9}): ([\x20-\x7e]+)')
+TEMP_PREFIX = '.c1accept3-'
+MAGIC = b'SEMCOD'
+
+
+class Outcome(Exception):
+    def __init__(self, code, reason, **extra):
+        super().__init__(reason)
+        self.code, self.reason, self.extra = code, reason, extra
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):  # never let argparse exit with 2 (that code means VM_FAILURE)
+        raise Outcome(5, 'usage: ' + message)
+
+
+def bounded_int(lo, hi):
+    def conv(text):
+        try:
+            v = int(text, 10)
+        except ValueError:
+            raise argparse.ArgumentTypeError('not an integer')
+        if not lo <= v <= hi:
+            raise argparse.ArgumentTypeError('must be in [%d, %d]' % (lo, hi))
+        return v
+    return conv
+
+
+def parse_args(argv):
+    p = Parser(add_help=False, allow_abbrev=False)
+    for name in ('--smc', '--c1', '--c1-sha256', '--root', '--input', '--out'):
+        p.add_argument(name, required=True)
+    p.add_argument('--expect-sha256')
+    p.add_argument('--max-stdout-bytes', type=bounded_int(1, 1 << 30), default=1 << 28)
+    p.add_argument('--max-stderr-bytes', type=bounded_int(1, 1 << 30), default=1 << 24)
+    p.add_argument('--run-timeout', type=bounded_int(1, 86400), default=3600)
+    p.add_argument('--verify-timeout', type=bounded_int(1, 86400), default=600)
+    a = p.parse_args(argv)
+    for name in ('c1_sha256', 'expect_sha256'):
+        v = getattr(a, name)
+        if v is not None:
+            v = v.lower().removeprefix('sha256:')
+            if not re.fullmatch(r'[0-9a-f]{64}', v):
+                raise Outcome(5, 'usage: --%s must be 64 hex digits' % name.replace('_', '-'))
+            setattr(a, name, v)
+    return a
+
+
+def key(path):
+    return os.path.normcase(os.path.realpath(path))
+
+
+def check_paths(a):
+    if not os.path.isdir(a.root):
+        raise Outcome(5, 'root is not a directory')
+    out = os.path.abspath(a.out)
+    parent = os.path.dirname(out)
+    if not os.path.isdir(parent):
+        raise Outcome(5, 'output directory does not exist')
+    if os.path.lexists(out):
+        raise Outcome(5, 'output already exists; refusing to reuse or overwrite it')
+    out_key = os.path.normcase(os.path.join(os.path.realpath(parent), os.path.basename(out)))
+    inp = a.input if os.path.isabs(a.input) else os.path.join(a.root, a.input)
+    for label, other in (('input', inp), ('c1', a.c1), ('smc', a.smc)):
+        if out_key == key(other):
+            raise Outcome(5, 'output path aliases the %s path' % label)
+    if os.path.basename(out).startswith(TEMP_PREFIX):
+        raise Outcome(5, 'output name uses the reserved temporary prefix')
+    return out, parent
+
+
+def build_run_cmd(a):
+    return [a.smc, 'run-smc', a.c1, '--expect-sha256', 'sha256:' + a.c1_sha256, '--profile', 'cli-read-only',
+            '--root', '.', '--envelope', 'trusted-compiler', '--max-steps', '150000000', '--max-calls', '2000000',
+            '--max-frames', '256', '--', a.input]
+
+
+def run_bounded(cmd, cwd, timeout, max_out, max_err):
+    """Run cmd capturing both streams with byte limits enforced while reading."""
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as e:
+        raise Outcome(5, 'cannot start %s: %s' % (os.path.basename(str(cmd[0])), type(e).__name__))
+    bufs = {'out': bytearray(), 'err': bytearray()}
+    over = {'out': False, 'err': False}
+
+    def pump(stream, name, limit):
+        try:
+            while True:
+                chunk = stream.read(65536)
+                if not chunk:
+                    return
+                if len(bufs[name]) + len(chunk) > limit:
+                    over[name] = True
+                    proc.kill()
+                    return
+                bufs[name] += chunk
+        finally:
+            stream.close()
+
+    threads = [threading.Thread(target=pump, args=(proc.stdout, 'out', max_out), daemon=True),
+               threading.Thread(target=pump, args=(proc.stderr, 'err', max_err), daemon=True)]
+    for t in threads:
+        t.start()
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        proc.wait()
+    for t in threads:
+        t.join(timeout=30)
+    return proc.returncode, bytes(bufs['out']), bytes(bufs['err']), over['out'], over['err'], timed_out
+
+
+def classify(stdout):
+    if not stdout.isascii():
+        raise Outcome(3, 'result is not ASCII')
+    s = stdout.decode('ascii')
+    if s.endswith('\r\n'):
+        s = s[:-2]
+    elif s.endswith('\n'):
+        s = s[:-1]
+    if s == '' or '\n' in s or '\r' in s:
+        raise Outcome(3, 'stdout must be exactly one non-empty line (one optional trailing LF or CRLF)')
+    m = HEX_LINE.fullmatch(s)
+    if m:
+        return bytes.fromhex(m.group(1))
+    e = ERR_LINE.fullmatch(s)
+    if e:
+        if int(e.group(2)) > 0xFFFFFFFF:
+            raise Outcome(3, 'error offset out of range')
+        raise Outcome(1, 'compiler rejected the input', category=e.group(1), offset=int(e.group(2)), message=e.group(3))
+    raise Outcome(3, 'result line is neither a valid hex line nor a valid error line')
+
+
+def write_temp(parent, data):
+    fd, tmp = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix='.tmp', dir=parent)
+    try:
+        with os.fdopen(fd, 'wb') as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return tmp
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify(a, path):
+    rc, out, err, o_over, e_over, t_out = run_bounded([a.smc, 'verify', path], os.path.dirname(path), a.verify_timeout, 1 << 20, 1 << 20)
+    if t_out:
+        raise Outcome(5, 'verifier timed out')
+    if rc != 0:
+        raise Outcome(4, 'smc verify rejected the artifact', verify_exit=rc)
+
+
+def publish_noclobber(src, dst):
+    """Move src to dst only if dst does not exist; never replaces an existing file."""
+    if os.name == 'nt':
+        os.rename(src, dst)  # MoveFileExW without MOVEFILE_REPLACE_EXISTING: fails if dst exists
+    else:
+        os.link(src, dst)  # fails with EEXIST if dst exists
+        os.unlink(src)
+
+
+def accept(a):
+    out, parent = check_paths(a)
+    rc, so, se, o_over, e_over, t_out = run_bounded(build_run_cmd(a), a.root, a.run_timeout, a.max_stdout_bytes, a.max_stderr_bytes)
+    info = {'run_exit': rc, 'stdout_bytes': len(so), 'stderr_bytes': len(se),
+            'stderr_non_audit_lines': sum(1 for line in se.splitlines() if line and not line.startswith(b'schema=semantic.foundation.application.audit/'))}
+    if t_out:
+        raise Outcome(2, 'run-smc exceeded the timeout; child killed', **info)
+    if o_over:
+        raise Outcome(3, 'stdout exceeded the limit; child killed', **info)
+    if e_over:
+        raise Outcome(3, 'stderr exceeded the limit; child killed', **info)
+    if rc != 0:
+        raise Outcome(2, 'run-smc exited %d; no compiler result is admissible' % rc, **info)
+    data = classify(so)
+    if not data.startswith(MAGIC):
+        raise Outcome(4, 'decoded bytes lack the SemCode magic', **info)
+    want = hashlib.sha256(data).hexdigest()
+    if a.expect_sha256 and want != a.expect_sha256:
+        raise Outcome(4, 'artifact sha256 differs from --expect-sha256', **info)
+    tmp = None
+    try:
+        try:
+            tmp = write_temp(parent, data)
+        except OSError as e:
+            raise Outcome(5, 'cannot write the temporary artifact: ' + type(e).__name__, **info)
+        verify(a, tmp)
+        if sha256_file(tmp) != want:
+            raise Outcome(4, 'verified file differs from the decoded result', **info)
+        try:
+            publish_noclobber(tmp, out)
+        except FileExistsError:
+            raise Outcome(5, 'output appeared concurrently; left untouched', **info)
+        except OSError as e:
+            raise Outcome(5, 'publication failed: ' + type(e).__name__, **info)
+        tmp = None
+        if sha256_file(out) != want:
+            raise Outcome(5, 'published file differs from the verified bytes; left in place for inspection', **info)
+        return {'outcome': 'ACCEPTED', 'code': 0, 'artifact_sha256': want, 'bytes': len(data), 'out': os.path.basename(out), **info}
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def main(argv=None):
+    try:
+        result = accept(parse_args(sys.argv[1:] if argv is None else argv))
+    except Outcome as o:
+        result = {'outcome': OUTCOMES[o.code], 'code': o.code, 'reason': o.reason, **o.extra}
+    except Exception as e:  # unexpected: fail closed
+        result = {'outcome': 'TOOL_FAILURE', 'code': 5, 'reason': 'internal error: ' + type(e).__name__}
+    try:
+        sys.stdout.write(json.dumps(result, sort_keys=True) + '\n')
+        sys.stdout.flush()
+    except Exception:
+        pass  # the exit code remains authoritative
+    return result['code']
+
+
+if __name__ == '__main__':
+    sys.exit(main())
 ```
 
-**Also needed:** `C1.smc` (the release asset `semantic-selfhost-compiler-C1.smc`, saved as `C1.smc`).
+**Also needed:** the release asset `semantic-selfhost-compiler-C1.smc`, saved as `C1.smc`.
+
+**Outcome codes**
+
+| Exit | Outcome | Meaning |
+| --- | --- | --- |
+| 0 | `ACCEPTED` | one valid `hex` line; `SEMCOD` magic; `smc verify` passed; published to a new file |
+| 1 | `REJECTED` | one well-formed `error <category> @<offset>: <message>` line; nothing written |
+| 2 | `VM_FAILURE` | `run-smc` exited non-zero or timed out; no result is admissible |
+| 3 | `PROTOCOL_FAILURE` | output missing, repeated, mixed, malformed, non-ASCII or over the size limit |
+| 4 | `VERIFY_FAILURE` | missing magic, `smc verify` failed, or the hash differs from `--expect-sha256` |
+| 5 | `TOOL_FAILURE` | bad arguments, output already exists or aliases an input, or an I/O / publication error |
 
 **Step 1**: expected exit **0**, observed exit **0**.
 ```powershell
-smc.exe run-smc C1.smc --expect-sha256 sha256:2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --profile cli-read-only --root . --envelope trusted-compiler --max-steps 150000000 --max-calls 2000000 --max-frames 256 -- prog.sm 2>$null > c1.out; $rc = $LASTEXITCODE; python -I c1_accept.py $rc c1.out prog.smc; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; smc.exe verify prog.smc
+New-Item -ItemType Directory out | Out-Null; python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input prog.sm --out out\prog.smc
 ```
 ```text
-ACCEPTED_CANDIDATE 153 bytes; run: smc verify prog.smc
-verified 'prog.smc' (1 function(s), header=SEMCOD22, epoch=0.23)
+{"artifact_sha256": "3b1113fedd90ff0e9c8c4ca99123e35c3fe80c41e18aedf5dd66de16eda7a264", "bytes": 153, "code": 0, "out": "prog.smc", "outcome": "ACCEPTED", "run_exit": 0, "stderr_bytes": 597, "stderr_non_audit_lines": 0, "stdout_bytes": 310}
 ```
 
-**Step 2 (negative control)**: expected exit **1**, observed exit **1**.
+**Step 2**: expected exit **0**, observed exit **0**.
 ```powershell
-smc.exe run-smc C1.smc --expect-sha256 sha256:2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --profile cli-read-only --root . --envelope trusted-compiler --max-steps 150000000 --max-calls 2000000 --max-frames 256 -- bad.sm 2>$null > c1.out; "run-smc exit: $LASTEXITCODE"; python -I c1_accept.py $LASTEXITCODE c1.out bad.smc; exit $LASTEXITCODE
+smc.exe compile prog.sm -o c0.smc | Out-Null; (Get-FileHash out\prog.smc).Hash -eq (Get-FileHash c0.smc).Hash
 ```
 ```text
-run-smc exit: 0
-REJECTED error name @37: unknown function 'fs_write_text'
+True
 ```
 
-**Step 3 (negative control)**: expected exit **2**, observed exit **2**.
+**Step 3 (negative control)**: expected exit **0**, observed exit **0**.
 ```powershell
-Set-Content -Path c1bad.out -Value 'hex 53454D' -NoNewline; python -I c1_accept.py 0 c1bad.out x.smc; exit $LASTEXITCODE
+python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input bad.sm --out out\bad.smc; "exit=$LASTEXITCODE"; Test-Path out\bad.smc
 ```
 ```text
-FAILED malformed result line
+{"category": "name", "code": 1, "message": "unknown function 'fs_write_text'", "offset": 37, "outcome": "REJECTED", "reason": "compiler rejected the input"}
+exit=1
+False
 ```
+
+**Step 4 (negative control)**: expected exit **0**, observed exit **0**.
+```powershell
+$before = (Get-FileHash out\prog.smc).Hash; python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input prog.sm --out out\prog.smc; "exit=$LASTEXITCODE"; (Get-FileHash out\prog.smc).Hash -eq $before
+```
+```text
+{"code": 5, "outcome": "TOOL_FAILURE", "reason": "output already exists; refusing to reuse or overwrite it"}
+exit=5
+True
+```
+
+**Limits**
+- The checker assumes a folder you control. It detects an output file that appears concurrently and leaves it untouched; it is not a defence against a hostile process of the same user.
+- If printing the JSON line fails after publication, the exit code still reports the outcome.
+- The deterministic test suite used to qualify this exact file is not part of this page. This is observed behaviour, not formal qualification.
 
 ## Notes
 
-- **One failure code.** Every failure in these recipes exited with code **1**; the C1 checker's own codes are 0, 1 and 2. Branch on the message or diagnostic code, not on other exit values.
-- **Use PowerShell 7 for recipe 07.** In Windows PowerShell 5.1, `>` writes UTF-16LE. The checker then refused the output with `FAILED unreadable stdout: UnicodeDecodeError` (observed). That is fail-closed, but it is not a usable result.
+- **One failure code.** Every `smc` failure in these recipes exited with code **1**. Branch on the message or diagnostic code, not on other exit values. The recipe 07 checker has its own codes 0–5 (table above).
+- **Recipe 07 needs Python 3.** The checker captures the compiler's output itself, so shell redirection and its encoding are not involved.
 - **Hashes show integrity only.** `SHA256SUMS` and `--expect-sha256` prove that bytes match. They do not prove who produced them: rc.2 assets are unsigned.
 - **Not covered:** non-Windows hosts, the installer, projects and packages (see the user manual, chapter 2), `watch`, `repl` and `lsp`.
