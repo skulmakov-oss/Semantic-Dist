@@ -363,7 +363,8 @@ file. The exit code is the outcome; one JSON line on stdout explains it.
 
 Outcomes: 0 ACCEPTED, 1 REJECTED (well-formed compiler rejection), 2 VM_FAILURE (run-smc
 non-zero, or timeout), 3 PROTOCOL_FAILURE (missing/ambiguous/malformed/oversized output),
-4 VERIFY_FAILURE (header, verifier, hash), 5 TOOL_FAILURE (usage, I/O, collision, alias).
+4 VERIFY_FAILURE (header, verifier, hash), 5 TOOL_FAILURE (usage, I/O, collision, alias,
+incomplete or failed output capture).
 
 Threat model: a caller-controlled scratch directory without hostile same-user activity.
 Concurrent creation of --out is detected and never overwritten; this is not a defence
@@ -458,28 +459,53 @@ def build_run_cmd(a):
             '--max-frames', '256', '--', a.input]
 
 
+READER_JOIN_TIMEOUT = 30  # seconds to wait for each reader thread after the child ends
+KILL_WAIT_TIMEOUT = 30    # seconds to wait for the child to exit after kill()
+
+
 def run_bounded(cmd, cwd, timeout, max_out, max_err):
-    """Run cmd capturing both streams with byte limits enforced while reading."""
+    """Run cmd capturing both streams with byte limits enforced while reading.
+
+    Fail closed: a reader error, a reader that does not finish (EOF or limit) in time,
+    or a child that does not exit after kill() raises Outcome(5). Partial streams are
+    never returned. Only the direct child is managed; descendants it spawns are not.
+    """
     try:
         proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError as e:
         raise Outcome(5, 'cannot start %s: %s' % (os.path.basename(str(cmd[0])), type(e).__name__))
     bufs = {'out': bytearray(), 'err': bytearray()}
     over = {'out': False, 'err': False}
+    done = {'out': False, 'err': False}  # True only after EOF or a deliberate stop at the limit
+    errors = {}
+
+    def stop_child():
+        try:
+            proc.kill()
+        except OSError:
+            pass
 
     def pump(stream, name, limit):
         try:
             while True:
                 chunk = stream.read(65536)
                 if not chunk:
+                    done[name] = True
                     return
                 if len(bufs[name]) + len(chunk) > limit:
                     over[name] = True
-                    proc.kill()
+                    done[name] = True
+                    stop_child()
                     return
                 bufs[name] += chunk
+        except BaseException as e:  # recorded and re-raised as a fail-closed outcome below
+            errors[name] = type(e).__name__
+            stop_child()
         finally:
-            stream.close()
+            try:
+                stream.close()
+            except OSError:
+                pass
 
     threads = [threading.Thread(target=pump, args=(proc.stdout, 'out', max_out), daemon=True),
                threading.Thread(target=pump, args=(proc.stderr, 'err', max_err), daemon=True)]
@@ -490,10 +516,20 @@ def run_bounded(cmd, cwd, timeout, max_out, max_err):
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        proc.kill()
-        proc.wait()
+        stop_child()
+        try:
+            proc.wait(timeout=KILL_WAIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise Outcome(5, 'child did not exit after kill; capture state unknown')
     for t in threads:
-        t.join(timeout=30)
+        t.join(timeout=READER_JOIN_TIMEOUT)
+    if any(t.is_alive() for t in threads):
+        stop_child()
+        raise Outcome(5, 'output capture did not complete')
+    if errors:
+        raise Outcome(5, 'output capture failed: ' + ', '.join('%s=%s' % kv for kv in sorted(errors.items())))
+    if not timed_out and not (done['out'] and done['err']):
+        raise Outcome(5, 'output capture ended without end-of-stream')
     return proc.returncode, bytes(bufs['out']), bytes(bufs['err']), over['out'], over['err'], timed_out
 
 
@@ -644,11 +680,13 @@ if __name__ == '__main__':
 | 2 | `VM_FAILURE` | `run-smc` exited non-zero or timed out; no result is admissible |
 | 3 | `PROTOCOL_FAILURE` | output missing, repeated, mixed, malformed, non-ASCII or over the size limit |
 | 4 | `VERIFY_FAILURE` | missing magic, `smc verify` failed, or the hash differs from `--expect-sha256` |
-| 5 | `TOOL_FAILURE` | bad arguments, output already exists or aliases an input, or an I/O / publication error |
+| 5 | `TOOL_FAILURE` | bad arguments; output already exists or aliases an input; an I/O or publication error; or output capture that failed or did not complete |
+
+Each step below is one fragment run with `pwsh -NoProfile -Command`. Checker steps end with `exit $LASTEXITCODE`, so the exit code shown is the checker's own; `-Command` alone would report every non-zero code as 1. The other steps are assertions that exit 1 if they fail.
 
 **Step 1**: expected exit **0**, observed exit **0**.
 ```powershell
-New-Item -ItemType Directory out | Out-Null; python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input prog.sm --out out\prog.smc
+New-Item -ItemType Directory out | Out-Null; python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input prog.sm --out out\prog.smc; exit $LASTEXITCODE
 ```
 ```text
 {"artifact_sha256": "3b1113fedd90ff0e9c8c4ca99123e35c3fe80c41e18aedf5dd66de16eda7a264", "bytes": 153, "code": 0, "out": "prog.smc", "outcome": "ACCEPTED", "run_exit": 0, "stderr_bytes": 597, "stderr_non_audit_lines": 0, "stdout_bytes": 310}
@@ -656,34 +694,47 @@ New-Item -ItemType Directory out | Out-Null; python -I c1_accept3.py --smc (Get-
 
 **Step 2**: expected exit **0**, observed exit **0**.
 ```powershell
-smc.exe compile prog.sm -o c0.smc | Out-Null; (Get-FileHash out\prog.smc).Hash -eq (Get-FileHash c0.smc).Hash
+smc.exe compile prog.sm -o c0.smc | Out-Null; if ((Get-FileHash out\prog.smc).Hash -eq (Get-FileHash c0.smc).Hash) { 'identical to smc compile' } else { 'DIFFERENT'; exit 1 }
 ```
 ```text
-True
+identical to smc compile
 ```
 
-**Step 3 (negative control)**: expected exit **0**, observed exit **0**.
+**Step 3 (negative control)**: expected exit **1**, observed exit **1**.
 ```powershell
-python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input bad.sm --out out\bad.smc; "exit=$LASTEXITCODE"; Test-Path out\bad.smc
+python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input bad.sm --out out\bad.smc; exit $LASTEXITCODE
 ```
 ```text
 {"category": "name", "code": 1, "message": "unknown function 'fs_write_text'", "offset": 37, "outcome": "REJECTED", "reason": "compiler rejected the input"}
-exit=1
-False
 ```
 
-**Step 4 (negative control)**: expected exit **0**, observed exit **0**.
+**Step 4**: expected exit **0**, observed exit **0**.
 ```powershell
-$before = (Get-FileHash out\prog.smc).Hash; python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input prog.sm --out out\prog.smc; "exit=$LASTEXITCODE"; (Get-FileHash out\prog.smc).Hash -eq $before
+if (Test-Path out\bad.smc) { 'UNEXPECTED FILE'; exit 1 } else { 'no file written' }
+```
+```text
+no file written
+```
+
+**Step 5 (negative control)**: expected exit **5**, observed exit **5**.
+```powershell
+python -I c1_accept3.py --smc (Get-Command smc.exe).Source --c1 C1.smc --c1-sha256 2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939 --root . --input prog.sm --out out\prog.smc; exit $LASTEXITCODE
 ```
 ```text
 {"code": 5, "outcome": "TOOL_FAILURE", "reason": "output already exists; refusing to reuse or overwrite it"}
-exit=5
-True
+```
+
+**Step 6**: expected exit **0**, observed exit **0**.
+```powershell
+if ((Get-FileHash out\prog.smc).Hash -eq (Get-FileHash c0.smc).Hash) { 'existing file unchanged' } else { 'CHANGED'; exit 1 }
+```
+```text
+existing file unchanged
 ```
 
 **Limits**
 - The checker assumes a folder you control. It detects an output file that appears concurrently and leaves it untouched; it is not a defence against a hostile process of the same user.
+- Output capture is fail-closed. A read error on either stream, a reader that does not reach end-of-stream, or a child that does not exit after being killed ends in outcome 5, and nothing is classified or published. Only the direct child process is managed; processes it starts itself are not tracked.
 - If printing the JSON line fails (also after publication), the checker exits immediately with the outcome code.
 - `--root`, `--c1` and an `--smc` path containing a separator are resolved against the folder you run the command from; `--input` is relative to `--root`. A bare `--smc` name is looked up on `PATH`.
 - The deterministic test suite used to qualify this exact file is not part of this page. This is observed behaviour, not formal qualification.

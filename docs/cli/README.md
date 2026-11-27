@@ -20,7 +20,10 @@ Capability audit lines go to stderr.
 Automation must fail closed. Process one run as follows:
 
 1. **Before running:** the output path must not exist and must not be any of the input, C1 or `smc` paths.
-2. **Capture:** read stdout and stderr with byte limits enforced while reading, and with a time limit. Exceeding a limit, or a non-zero `run-smc` exit, means there is no admissible result. This is a VM failure, even if stdout looks valid.
+2. **Capture:** read stdout and stderr with byte limits enforced while reading, and with a time limit. No result is admissible, even if stdout looks valid, when:
+   - `run-smc` exits non-zero or exceeds the time limit (**VM failure**);
+   - either stream exceeds its limit (**protocol failure**);
+   - reading either stream fails or does not reach end-of-stream (**tool failure**).
 3. **Classify:** stdout must be ASCII and **exactly one** non-empty line, with at most one trailing LF or CRLF.
    - The line must match `hex ((?:[0-9a-f]{2})+)` in full, or
    - `error (syntax|name|type|context|unsupported) @(0|[1-9][0-9]{0,9}): ([\x20-\x7e]+)` in full, with an offset of at most 4294967295.
