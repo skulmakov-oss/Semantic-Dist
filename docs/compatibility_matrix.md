@@ -1,7 +1,7 @@
 # Compatibility & Platform Support Matrix — Semantic-Dist
 
 Status: Normative Platform Baseline  
-Target Release: `v1.3.0-rc.2` (candidate)
+Current Release: [`v1.3.0-rc.2`](https://github.com/skulmakov-oss/Semantic-Dist/releases/tag/v1.3.0-rc.2) (published prerelease, 2026-11-26; unsigned Windows x64 developer preview. The qualification columns below are not changed by this note.)
 
 ---
 
